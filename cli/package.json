@@ -1,14 +1,14 @@
 {
-  "name": "foc-skill",
+  "name": "foc-cli",
   "version": "0.0.4",
   "description": "CLI for Filecoin Onchain Cloud — decentralized storage on Filecoin with PDP verification and USDFC payments.",
   "type": "module",
   "main": "dist/src/index.js",
   "bin": {
-    "foc-skill": "bin/foc-skill.cjs"
+    "foc-cli": "bin/foc-cli.cjs"
   },
   "files": [
-    "bin/foc-skill.cjs",
+    "bin/foc-cli.cjs",
     "dist/src/**/*.js",
     "dist/src/**/*.d.ts",
     "dist/package.json",

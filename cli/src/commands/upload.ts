@@ -85,7 +85,7 @@ export const uploadCommand = {
         },
       })
 
-      const synapse = new Synapse({ client, source: 'foc-skill' })
+      const synapse = new Synapse({ client, source: 'foc-cli' })
 
       out.step('Creating storage contexts')
       const contexts = await synapse.storage.createContexts({

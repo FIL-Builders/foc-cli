@@ -43,7 +43,7 @@ export const balanceCommand = {
 }
 
 async function fetchBalances(client: any) {
-  const synapse = new Synapse({ client, source: 'foc-skill' })
+  const synapse = new Synapse({ client, source: 'foc-cli' })
   const filBalance = await synapse.payments.walletBalance()
   const usdfcBalance = await synapse.payments.walletBalance({
     token: TOKENS.USDFC,

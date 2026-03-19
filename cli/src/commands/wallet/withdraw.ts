@@ -26,7 +26,7 @@ export const withdrawCommand = {
   async run(c: any) {
     const out = new OutputContext(c)
     const { client, chain } = privateKeyClient(c.options.chain)
-    const synapse = new Synapse({ client, source: 'foc-skill' })
+    const synapse = new Synapse({ client, source: 'foc-cli' })
 
     try {
       out.step('Withdrawing funds')

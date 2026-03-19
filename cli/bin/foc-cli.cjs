@@ -75,7 +75,7 @@ if (major >= 18) {
     process.exit(result.status || 0);
   } else {
     process.stderr.write(
-      "\x1b[31mfoc-skill requires Node.js >= 18 (current: " +
+      "\x1b[31mfoc-cli requires Node.js >= 18 (current: " +
         process.version +
         ")\x1b[0m\n" +
         "Upgrade with:  nvm install 22 && nvm use 22\n"

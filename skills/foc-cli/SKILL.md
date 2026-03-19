@@ -1,9 +1,9 @@
 ---
-name: foc-skill
-description: Use when working with Filecoin Onchain Cloud, the foc-skill CLI, Synapse SDK, storing files on Filecoin, PDP datasets, USDFC payments, or any decentralized cloud storage task on Filecoin. Triggers on "foc", "filecoin cloud", "synapse", "warm storage", "PDP", "USDFC", "foc-skill", "upload", "store", "wallet", "deposit", "dataset", "piece", "provider".
+name: foc-cli
+description: Use when working with Filecoin Onchain Cloud, the foc-cli CLI, Synapse SDK, storing files on Filecoin, PDP datasets, USDFC payments, or any decentralized cloud storage task on Filecoin. Triggers on "foc", "filecoin cloud", "synapse", "warm storage", "PDP", "USDFC", "foc-cli", "upload", "store", "wallet", "deposit", "dataset", "piece", "provider".
 ---
 
-# foc-skill — Filecoin Onchain Cloud CLI
+# foc-cli — Filecoin Onchain Cloud CLI
 
 Store, verify, and pay for data on Filecoin's programmable cloud.
 
@@ -27,19 +27,19 @@ FOC turns Filecoin into a **programmable cloud** with four layers:
 ## Setup
 
 ```bash
-npx foc-skill wallet init --auto   # generate wallet (or --keystore <path>, --privateKey <key>)
+npx foc-cli wallet init --auto   # generate wallet (or --keystore <path>, --privateKey <key>)
 ```
 
-Config: `~/Library/Preferences/foc-skill/config.json` (macOS). Keys: `privateKey`, `keystore`.
+Config: `~/Library/Preferences/foc-cli/config.json` (macOS). Keys: `privateKey`, `keystore`.
 
 ## Self-Documenting
 
 Every command supports `-h` for full usage, args, options, and examples:
 
 ```bash
-npx foc-skill --help             # all commands
-npx foc-skill upload -h          # upload args/options/examples
-npx foc-skill wallet deposit -h  # deposit args/options
+npx foc-cli --help             # all commands
+npx foc-cli upload -h          # upload args/options/examples
+npx foc-cli wallet deposit -h  # deposit args/options
 ```
 
 **Always use `-h` first** to discover the exact interface before running a command.
@@ -66,9 +66,9 @@ All commands accept these — not repeated per-command below:
 | `multi-upload <paths> [--copies N] [--withCDN]` | Batch upload. Comma-separated paths. |
 
 ```bash
-npx foc-skill upload ./file.pdf                     # simplest
-npx foc-skill upload ./file.pdf --withCDN --copies 3
-npx foc-skill multi-upload ./a.pdf,./b.pdf
+npx foc-cli upload ./file.pdf                     # simplest
+npx foc-cli upload ./file.pdf --withCDN --copies 3
+npx foc-cli multi-upload ./a.pdf,./b.pdf
 ```
 
 ### Wallet & Payments
@@ -111,45 +111,45 @@ npx foc-skill multi-upload ./a.pdf,./b.pdf
 ### First-time setup (testnet)
 
 ```bash
-npx foc-skill wallet init --auto
-npx foc-skill wallet fund
-npx foc-skill wallet deposit 1
-npx foc-skill wallet balance
+npx foc-cli wallet init --auto
+npx foc-cli wallet fund
+npx foc-cli wallet deposit 1
+npx foc-cli wallet balance
 ```
 
 ### Upload files
 
 ```bash
-npx foc-skill upload ./myfile.pdf                          # auto everything
-npx foc-skill upload ./myfile.pdf --withCDN                # with CDN
-npx foc-skill multi-upload ./a.pdf,./b.pdf --copies 3      # batch, 3 copies
-npx foc-skill wallet costs --extraBytes 1000000 --extraRunway 1  # check costs first
+npx foc-cli upload ./myfile.pdf                          # auto everything
+npx foc-cli upload ./myfile.pdf --withCDN                # with CDN
+npx foc-cli multi-upload ./a.pdf,./b.pdf --copies 3      # batch, 3 copies
+npx foc-cli wallet costs --extraBytes 1000000 --extraRunway 1  # check costs first
 ```
 
 ### Manage data
 
 ```bash
-npx foc-skill dataset list
-npx foc-skill dataset details -d 42
-npx foc-skill piece list 42
-npx foc-skill piece remove 42 7
-npx foc-skill dataset terminate 42
+npx foc-cli dataset list
+npx foc-cli dataset details -d 42
+npx foc-cli piece list 42
+npx foc-cli piece remove 42 7
+npx foc-cli dataset terminate 42
 ```
 
 ### Agent / programmatic
 
 ```bash
-npx foc-skill wallet balance --json
-npx foc-skill dataset list --filter-output datasets.dataSetId
-npx foc-skill upload --schema                # full command schema
+npx foc-cli wallet balance --json
+npx foc-cli dataset list --filter-output datasets.dataSetId
+npx foc-cli upload --schema                # full command schema
 ```
 
 ## MCP Integration
 
 ```bash
-npx foc-skill mcp add                    # auto-detect agent
-npx foc-skill mcp add --agent claude-code
-npx foc-skill --mcp                      # start MCP server (stdio)
+npx foc-cli mcp add                    # auto-detect agent
+npx foc-cli mcp add --agent claude-code
+npx foc-cli --mcp                      # start MCP server (stdio)
 ```
 
 Tools use underscores: `wallet_init`, `wallet_balance`, `dataset_list`, `upload`, etc.

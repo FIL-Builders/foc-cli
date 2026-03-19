@@ -11,7 +11,7 @@ function privateKeyFromConfig() {
     const privateKey = config.get('privateKey')
     if (!privateKey) {
       throw new Error(
-        'Private key not found. Please run `foc-skill wallet init` to initialize the CLI'
+        'Private key not found. Please run `foc-cli wallet init` to initialize the CLI'
       )
     }
     return privateKey

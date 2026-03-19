@@ -8,14 +8,14 @@ import { provider } from './commands/provider/index.ts'
 import { uploadCommand } from './commands/upload.ts'
 import { wallet } from './commands/wallet/index.ts'
 
-const cli = Cli.create('foc-skill', {
+const cli = Cli.create('foc-cli', {
   version: '0.0.4',
   description:
     'CLI for Filecoin Onchain Cloud — decentralized storage on Filecoin with PDP verification and USDFC payments.',
   sync: {
     include: ['_root'],
     suggestions: [
-      'initialize wallet with foc-skill wallet init --auto',
+      'initialize wallet with foc-cli wallet init --auto',
       'upload multiple files to Filecoin warm storage',
       'check wallet balances and payment account info',
       'create a new PDP dataset with a storage provider',

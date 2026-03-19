@@ -31,7 +31,7 @@ export const fundCommand = {
       await waitForTransactionReceipt(client, { hash: hashes[0].tx_hash })
 
       out.step('Fetching updated balances')
-      const synapse = new Synapse({ client, source: 'foc-skill' })
+      const synapse = new Synapse({ client, source: 'foc-cli' })
       const filBalance = await synapse.payments.walletBalance()
       const usdfcBalance = await synapse.payments.walletBalance({
         token: 'USDFC',

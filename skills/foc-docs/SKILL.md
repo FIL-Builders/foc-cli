@@ -5,7 +5,7 @@ description: Search and fetch Filecoin Onchain Cloud documentation. Use when loo
 
 # foc-docs — Documentation Search
 
-Fast, filtered access to **Filecoin Onchain Cloud** docs via `npx foc-skill docs`.
+Fast, filtered access to **Filecoin Onchain Cloud** docs via `npx foc-cli docs`.
 
 ## How It Works
 
@@ -14,7 +14,7 @@ Searches a curated index of ~28 doc pages (from 1300+ raw entries). When your se
 ## Command
 
 ```bash
-npx foc-skill docs [--prompt <text>] [--url <url>] [--maxDepth <n>]
+npx foc-cli docs [--prompt <text>] [--url <url>] [--maxDepth <n>]
 ```
 
 | Flag | Type | Default | Description |
@@ -37,17 +37,17 @@ npx foc-skill docs [--prompt <text>] [--url <url>] [--maxDepth <n>]
 **Search first** (recommended) — then drill into specific pages:
 
 ```bash
-npx foc-skill docs --prompt "upload files"       # auto-fetches Storage Operations
-npx foc-skill docs --prompt "payments"           # auto-fetches Payment Operations
-npx foc-skill docs --prompt "PDP"               # auto-fetches PDP Overview
+npx foc-cli docs --prompt "upload files"       # auto-fetches Storage Operations
+npx foc-cli docs --prompt "payments"           # auto-fetches Payment Operations
+npx foc-cli docs --prompt "PDP"               # auto-fetches PDP Overview
 ```
 
 **Fetch a specific page:**
 
 ```bash
-npx foc-skill docs --url https://docs.filecoin.cloud/developer-guides/storage/storage-operations.md
-npx foc-skill docs --url <url> --maxDepth 6      # full detail
-npx foc-skill docs --url <url> --maxDepth 2      # high-level only
+npx foc-cli docs --url https://docs.filecoin.cloud/developer-guides/storage/storage-operations.md
+npx foc-cli docs --url <url> --maxDepth 6      # full detail
+npx foc-cli docs --url <url> --maxDepth 2      # high-level only
 ```
 
 ## Doc Map
@@ -69,7 +69,7 @@ npx foc-skill docs --url <url> --maxDepth 2      # high-level only
 
 ## MCP Tool
 
-Available as `mcp__foc-skill__docs` with options: `prompt`, `url`, `maxDepth`, `debug`.
+Available as `mcp__foc-cli__docs` with options: `prompt`, `url`, `maxDepth`, `debug`.
 
 ## Tips
 

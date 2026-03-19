@@ -42,7 +42,7 @@ export const costsCommand = {
     try {
       out.step('Getting costs')
 
-      const synapse = new Synapse({ client, source: 'foc-skill' })
+      const synapse = new Synapse({ client, source: 'foc-cli' })
 
       const prep = await synapse.storage.prepare({
         dataSize: BigInt(c.options.extraBytes),
