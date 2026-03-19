@@ -9,7 +9,7 @@ import { uploadCommand } from './commands/upload.ts'
 import { wallet } from './commands/wallet/index.ts'
 
 const cli = Cli.create('foc-skill', {
-  version: '0.0.1',
+  version: '0.0.2',
   description:
     'CLI for Filecoin Onchain Cloud — decentralized storage on Filecoin with PDP verification and USDFC payments.',
   sync: {

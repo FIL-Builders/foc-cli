@@ -1,186 +1,164 @@
-# foc-skill
+<p align="center">
+  <strong>foc-skill</strong>
+  <br/>
+  Store files on Filecoin. From your terminal. Or your AI agent.
+</p>
 
-CLI and AI agent skill for **Filecoin Onchain Cloud (FOC)** — decentralized storage on Filecoin with PDP verification and USDFC payments.
+<p align="center">
+  <a href="https://docs.filecoin.cloud">Docs</a> &nbsp;&bull;&nbsp;
+  <a href="https://skills.sh">Skills.sh</a> &nbsp;&bull;&nbsp;
+  <a href="https://github.com/FIL-Builders/foc-skill">GitHub</a>
+</p>
 
-Built with [incur](https://github.com/wevm/incur) for seamless use by both humans and AI agents (MCP, skills, structured output).
+---
+
+**foc-skill** is a CLI and AI agent skill for [Filecoin Onchain Cloud](https://docs.filecoin.cloud) (FOC) — decentralized warm storage with cryptographic proof your data is held, paid with USDFC stablecoin on Filecoin.
+
+**Why FOC?** Traditional cloud storage requires trusting a provider. FOC gives you onchain verification (PDP proofs), programmable payments, and redundant copies across independent storage providers — all through a simple CLI or AI agent skill.
 
 ## Install
+
+**As a CLI:**
 
 ```bash
 npm install -g foc-skill
 ```
 
-Or run directly:
+**As an AI Agent Skill** via [skills.sh](https://skills.sh) — works with Claude Code, Cursor, Copilot, Codex, Windsurf, and 20+ AI tools:
 
 ```bash
-npx foc-skill --help
-```
-
-## Install as AI Agent Skill
-
-Add foc-skill to your AI coding agent using [skills.sh](https://skills.sh):
-
-```bash
+# Install all skills (CLI + docs)
 npx skills add FIL-Builders/foc-skill
+
+# Or install individually
+npx skills add FIL-Builders/foc-skill --skill foc-skill  # CLI & operations
+npx skills add FIL-Builders/foc-skill --skill foc-docs   # Documentation search
 ```
 
-This installs the skill for Claude Code, Cursor, Copilot, Codex, Windsurf, and 20+ other AI tools.
-
-Or register as an MCP server for direct tool access:
+**As an MCP server** for direct tool access:
 
 ```bash
-foc-skill mcp add                    # Auto-detect your agent
-foc-skill mcp add --agent claude-code  # Specific agent
+npx foc-skill mcp add                       # Auto-detect your agent
+npx foc-skill mcp add --agent claude-code   # Specific agent
 ```
-
-## Skills
-
-This package ships three focused skills for AI agents:
-
-| Skill | When to use |
-|-------|-------------|
-| **foc-skill** | General overview — what is FOC, architecture, installation, all commands at a glance. Start here when you're new. |
-| **foc-ops** | Executing storage operations — uploading files, managing wallets/payments, datasets, pieces, and providers. Use when you need to **do** something. |
-| **foc-docs** | Searching FOC documentation — find guides, SDK references, and concept explainers. Use when you need to **learn** something. |
-
-### foc-skill (overview)
-
-The main skill. Covers what Filecoin Onchain Cloud is, the four-layer architecture (Storage, Verification, Settlement, Developer), pricing, setup, and a complete command reference. Best as your entry point.
-
-### foc-ops (operations)
-
-All operational commands with full argument/option schemas from incur's `--llms-full` manifest. Covers:
-
-- **upload / multi-upload** — file storage with copies and CDN
-- **wallet** — init, balance, fund, deposit, withdraw, summary, costs
-- **dataset** — create, list, details, upload, terminate
-- **piece** — list, remove
-- **provider** — list approved PDP providers
-
-Use this skill when you need to execute commands, understand their arguments, or build automation.
-
-### foc-docs (documentation)
-
-The `docs` command with usage patterns, the doc map (topic-to-URL lookup table), and tips for getting content in 1 call. Use this skill when you need to look up Synapse SDK APIs, storage guides, payment operations, or any FOC reference material.
 
 ## Quick Start
 
 ```bash
-# 1. Initialize wallet
-foc-skill wallet init --auto
-
-# 2. Get testnet tokens
-foc-skill wallet fund
-
-# 3. Deposit USDFC for storage payments
-foc-skill wallet deposit 1
-
-# 4. Upload a file
-foc-skill upload ./myfile.pdf
+npx foc-skill wallet init --auto        # 1. Create a wallet
+npx foc-skill wallet fund               # 2. Get testnet tokens
+npx foc-skill wallet deposit 1          # 3. Deposit 1 USDFC for storage
+npx foc-skill upload ./myfile.pdf       # 4. Upload a file
 ```
 
-## What is Filecoin Onchain Cloud?
+That's it. Your file is now stored on Filecoin with PDP verification and redundant copies.
 
-FOC transforms Filecoin from cold archive storage into a **programmable cloud service layer**:
+## Skills
 
-- **Warm Storage** (FWSS) — fast, retrievable, PDP-verified data storage
-- **Proof of Data Possession** (PDP) — cryptographic proof providers still hold your data
-- **Filecoin Pay** — programmable onchain payments in USDFC
-- **Synapse SDK** — TypeScript APIs for storage, payments, and retrieval
+This package ships two focused skills for AI agents:
 
-**Pricing:** $2.5/TiB/month/copy (min 2 copies). Minimum 0.06 USDFC/month (~24 GiB).
+| Skill | Purpose | When to use |
+|-------|---------|-------------|
+| **foc-skill** | CLI & Operations | Setup, upload, wallets, datasets, pieces, providers — everything operational. |
+| **foc-docs** | Documentation | Search guides, SDK refs, concept explainers. |
 
 ## Commands
 
-Every command supports `-h` / `--help` for full usage details.
+Every command supports `-h` for full usage details.
 
 ### Upload
 
 ```bash
-foc-skill upload <path>                      # Auto provider/dataset selection
-foc-skill upload <path> --withCDN --copies 3 # CDN + 3 copies
-foc-skill multi-upload ./a.pdf,./b.pdf       # Batch upload
+npx foc-skill upload <path>                        # Upload with auto provider/dataset
+npx foc-skill upload <path> --withCDN --copies 3   # CDN + 3 redundant copies
+npx foc-skill multi-upload ./a.pdf,./b.pdf         # Batch upload
 ```
 
-### Wallet & Payments
+### Wallet
 
 ```bash
-foc-skill wallet init [--auto|--keystore <path>|--privateKey <key>]
-foc-skill wallet balance           # FIL/USDFC balances
-foc-skill wallet fund              # Testnet faucet
-foc-skill wallet deposit <amount>  # Deposit USDFC
-foc-skill wallet withdraw <amount> # Withdraw USDFC
-foc-skill wallet summary           # Funding timeline & rates
-foc-skill wallet costs --extraBytes <n> --extraRunway <months>
+npx foc-skill wallet init [--auto|--keystore <path>|--privateKey <key>]
+npx foc-skill wallet balance             # Check FIL & USDFC balances
+npx foc-skill wallet fund                # Testnet faucet
+npx foc-skill wallet deposit <amount>    # Deposit USDFC for storage
+npx foc-skill wallet withdraw <amount>   # Withdraw USDFC
+npx foc-skill wallet summary             # Funding timeline & rates
+npx foc-skill wallet costs --extraBytes <n> --extraRunway <months>
 ```
 
 ### Datasets
 
 ```bash
-foc-skill dataset list                       # List all datasets
-foc-skill dataset details -d <id>            # Dataset metadata + pieces
-foc-skill dataset create [providerId] [--cdn] # Create dataset
-foc-skill dataset upload <path> <providerId>  # Create + upload
-foc-skill dataset terminate <dataSetId>       # Terminate dataset
+npx foc-skill dataset list                          # List all datasets
+npx foc-skill dataset details -d <id>               # Metadata + pieces
+npx foc-skill dataset create [providerId] [--cdn]   # Create dataset
+npx foc-skill dataset upload <path> <providerId>    # Create + upload
+npx foc-skill dataset terminate <dataSetId>         # Terminate dataset
 ```
 
-### Pieces
+### Pieces & Providers
 
 ```bash
-foc-skill piece list <dataSetId>             # List pieces
-foc-skill piece remove <dataSetId> <pieceId> # Remove piece
+npx foc-skill piece list <dataSetId>                # List pieces in dataset
+npx foc-skill piece remove <dataSetId> <pieceId>    # Remove piece
+npx foc-skill provider list                         # Approved PDP providers
 ```
 
-### Providers
+### Docs
 
 ```bash
-foc-skill provider list             # Approved PDP providers + performance
-```
-
-### Documentation
-
-```bash
-foc-skill docs                                          # Browse docs index
-foc-skill docs --prompt "how to upload files"           # Search for relevant pages
-foc-skill docs --url https://docs.filecoin.cloud/getting-started  # Fetch specific page
+npx foc-skill docs                                  # Browse docs index
+npx foc-skill docs --prompt "upload files"          # Search by topic
+npx foc-skill docs --url <url>                      # Fetch specific page
 ```
 
 ### Global Options
 
-| Option                | Default  | Description                                    |
-| --------------------- | -------- | ---------------------------------------------- |
+| Option | Default | Description |
+|--------|---------|-------------|
 | `--chain <id>` / `-c` | `314159` | Chain ID (`314159` = testnet, `314` = mainnet) |
-| `--debug`             | `false`  | Verbose error logging                          |
-| `--format <fmt>`      | `toon`   | Output: `toon`, `json`, `yaml`, `md`           |
-| `--json`              |          | Shorthand for `--format json`                  |
+| `--debug` | `false` | Verbose error logging |
+| `--format <fmt>` | `toon` | Output format: `toon`, `json`, `yaml`, `md` |
+| `--json` | | Shorthand for `--format json` |
+
+## How FOC Works
+
+FOC transforms Filecoin into a **programmable cloud storage layer**:
+
+| Layer | What it does |
+|-------|-------------|
+| **Storage** | Warm, retrievable files via FWSS (Filecoin Warm Storage Service) |
+| **Verification** | PDP (Proof of Data Possession) — cryptographic proof providers hold your data |
+| **Settlement** | Filecoin Pay — continuous USDFC payment streams to providers |
+| **Developer** | Synapse SDK + this CLI — TypeScript APIs for storage, payments, retrieval |
+
+**Pricing:** $2.5/TiB/month per copy (minimum 2 copies). Minimum spend: 0.06 USDFC/month (~24 GiB).
 
 ## Agent Features
 
-foc-skill is built with [incur](https://github.com/wevm/incur), providing:
+Built with [incur](https://github.com/wevm/incur) for first-class AI agent support:
 
-- **MCP Server** — all commands exposed as MCP tools (`foc-skill --mcp`)
-- **Structured Output** — `--json`, `--format yaml`, `--filter-output`, `--token-count`
-- **Schema Introspection** — `foc-skill <command> --schema` for JSON Schema of args/options/output
-- **LLM Manifest** — `foc-skill --llms` for machine-readable command docs
-- **TTY Awareness** — interactive prompts for humans, structured envelopes for agents
+- **MCP Server** — all commands as MCP tools (`npx foc-skill --mcp`)
+- **Structured Output** — `--json`, `--format yaml`, `--token-count`
+- **Schema Introspection** — `npx foc-skill <cmd> --schema` for JSON Schema
+- **LLM Manifest** — `npx foc-skill --llms` for machine-readable docs
+- **TTY Awareness** — interactive prompts for humans, structured output for agents
 
-## Mainnet Usage
+## Mainnet
 
-All commands default to Calibration testnet. Use `--chain 314` for mainnet:
+All commands default to **Calibration testnet**. Add `--chain 314` for mainnet:
 
 ```bash
-foc-skill upload ./data.bin --chain 314
-foc-skill wallet balance --chain 314
+npx foc-skill upload ./data.bin --chain 314
 ```
 
-## Documentation
+## References
 
-- [FOC Docs](https://docs.filecoin.cloud)
+- [FOC Documentation](https://docs.filecoin.cloud)
 - [LLM-friendly docs](https://docs.filecoin.cloud/llms.txt)
 - [Synapse SDK](https://github.com/FilOzone/synapse-sdk)
 - [PDP Overview](https://docs.filecoin.cloud/core-concepts/pdp-overview/)
 - [Filecoin Pay](https://docs.filecoin.cloud/core-concepts/filecoin-pay-overview/)
-- [Warm Storage](https://docs.filecoin.cloud/core-concepts/fwss-overview/)
 
 ## License
 

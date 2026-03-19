@@ -1,6 +1,6 @@
 {
   "name": "foc-skill",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "CLI for Filecoin Onchain Cloud — decentralized storage on Filecoin with PDP verification and USDFC payments.",
   "type": "module",
   "main": "dist/src/index.js",
@@ -10,6 +10,7 @@
   "files": [
     "dist/src/**/*.js",
     "dist/src/**/*.d.ts",
+    "dist/package.json",
     "README.md",
     "LICENSE",
     "skills/"
