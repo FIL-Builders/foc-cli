@@ -50,8 +50,8 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.0.0",
-    "@filoz/synapse-core": "^0.3.1",
-    "@filoz/synapse-sdk": "^0.40.0",
+    "@filoz/synapse-core": "^0.4.1",
+    "@filoz/synapse-sdk": "^0.40.4",
     "@remix-run/fs": "^0.4.1",
     "conf": "^15.0.2",
     "incur": "^0.3.1",
