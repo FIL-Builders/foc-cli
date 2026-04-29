@@ -81,7 +81,7 @@ npx foc-cli multi-upload ./a.pdf,./b.pdf
 | `wallet deposit <amount>` | Deposit USDFC into payment account |
 | `wallet withdraw <amount>` | Withdraw USDFC from payment account |
 | `wallet summary` | Account summary with funding timeline |
-| `wallet costs [--extraBytes N] [--extraRunway N]` | Calculate upload costs + deposit needed |
+| `wallet costs --extraBytes N --extraRunway N` | Calculate upload costs + deposit needed |
 
 ### Dataset Management
 
@@ -89,7 +89,7 @@ npx foc-cli multi-upload ./a.pdf,./b.pdf
 |---------|-------------|
 | `dataset list` | All datasets with provider, CDN status, state |
 | `dataset details -d <id>` | Dataset metadata + all pieces |
-| `dataset create [providerId] [--cdn]` | Create dataset (interactive provider selection if omitted) |
+| `dataset create <providerId> [--cdn]` | Create dataset with a provider from `provider list` |
 | `dataset upload <path> <providerId> [--cdn]` | Create dataset + upload in one step |
 | `dataset terminate <dataSetId>` | Stop PDP service for a dataset |
 
