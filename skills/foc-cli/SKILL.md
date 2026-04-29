@@ -63,12 +63,12 @@ All commands accept these — not repeated per-command below:
 | Command | Description |
 |---------|-------------|
 | `upload <path> [--copies N] [--withCDN]` | Upload file. Auto-selects provider, creates dataset. Default 2 copies. |
-| `multi-upload <paths> [--copies N] [--withCDN]` | Batch upload. Comma-separated paths. |
+| `multi-upload <paths> [--copies N] [--withCDN]` | Batch upload. Comma-separated paths; all paths must be readable. |
 
 ```bash
 npx foc-cli upload ./file.pdf                     # simplest
 npx foc-cli upload ./file.pdf --withCDN --copies 3
-npx foc-cli multi-upload ./a.pdf,./b.pdf
+npx foc-cli multi-upload ./a.pdf,./b.pdf         # all paths must be readable
 ```
 
 ### Wallet & Payments
@@ -122,7 +122,7 @@ npx foc-cli wallet balance
 ```bash
 npx foc-cli upload ./myfile.pdf                          # auto everything
 npx foc-cli upload ./myfile.pdf --withCDN                # with CDN
-npx foc-cli multi-upload ./a.pdf,./b.pdf --copies 3      # batch, 3 copies
+npx foc-cli multi-upload ./a.pdf,./b.pdf --copies 3      # batch, 3 copies; all paths must be readable
 npx foc-cli wallet costs --extraBytes 1000000 --extraRunway 1  # check costs first
 ```
 

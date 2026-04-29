@@ -300,9 +300,21 @@ describe('top-level upload commands', () => {
     ])
   })
 
-  test.todo(
-    'multi-upload should fail when any requested file cannot be read instead of silently uploading the readable subset'
-  )
+  test('multi-upload fails when any requested file cannot be read instead of silently uploading the readable subset', async () => {
+    const readable = await tempFile('readable.txt', 'ok')
+    const missing = path.join(path.dirname(readable), 'missing.txt')
+
+    const result = await multiUploadCommand.run(
+      commandContext({
+        args: { paths: [readable, missing] },
+      })
+    )
+
+    expect(result.error.code).toBe('FILE_READ_FAILED')
+    expect(result.error.message).toContain(missing)
+    expect(synapseStorage.createContexts).not.toHaveBeenCalled()
+    expect(synapseStorage.upload).not.toHaveBeenCalled()
+  })
 })
 
 describe('wallet commands', () => {
@@ -609,9 +621,32 @@ describe('dataset commands', () => {
     })
   })
 
-  test.todo(
-    'dataset details should return an object for empty piece metadata instead of the string "No metadata"'
-  )
+  test('dataset details returns an object for empty piece metadata', async () => {
+    getPiecesWithMetadata.mockImplementationOnce(async () => ({
+      pieces: [
+        {
+          id: 8n,
+          cid: cid('baga-empty-metadata'),
+          url: 'https://provider.example/piece/baga-empty-metadata',
+          metadata: {},
+        },
+      ],
+    }))
+
+    const result = await datasetDetailsCommand.run(
+      commandContext({ options: { dataSetId: 42 } })
+    )
+
+    expect(result.pieces).toEqual([
+      {
+        id: '8',
+        cid: 'baga-empty-metadata',
+        scannerUrl: 'https://pdp.vxb.ai/calibration/piece/baga-empty-metadata',
+        url: 'https://provider.example/piece/baga-empty-metadata',
+        metadata: {},
+      },
+    ])
+  })
 })
 
 describe('piece commands', () => {
@@ -628,7 +663,7 @@ describe('piece commands', () => {
       address: fakeWalletClient.account.address,
     })
     expect(result).toMatchObject({
-      dataSetId: 42,
+      dataSetId: '42',
       datasetScannerUrl: 'https://pdp.vxb.ai/calibration/dataset/42',
       pieces: [
         {
@@ -663,7 +698,11 @@ describe('piece commands', () => {
     })
   })
 
-  test.todo(
-    'piece list should return dataSetId as a string to match its schema'
-  )
+  test('piece list returns dataSetId as a string to match its schema', async () => {
+    const result = await pieceListCommand.run(
+      commandContext({ args: { dataSetId: 42 } })
+    )
+
+    expect(result.dataSetId).toBe('42')
+  })
 })

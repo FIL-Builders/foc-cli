@@ -63,7 +63,7 @@ export const listCommand = {
 
       return out.done(
         {
-          dataSetId: c.args.dataSetId,
+          dataSetId: c.args.dataSetId.toString(),
           datasetScannerUrl: datasetScannerUrl(c.args.dataSetId, chain),
           pieces: piecesList,
         },
