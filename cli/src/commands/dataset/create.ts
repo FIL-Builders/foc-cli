@@ -10,7 +10,6 @@ export const createCommand = {
   args: z.object({
     providerId: z.coerce
       .number()
-      .optional()
       .describe('Provider ID. Use provider list to choose one.'),
   }),
   options: z.object({
