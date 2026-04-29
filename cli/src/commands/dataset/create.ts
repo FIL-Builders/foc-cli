@@ -11,7 +11,7 @@ export const createCommand = {
     providerId: z.coerce
       .number()
       .optional()
-      .describe('Provider ID (interactive selection if omitted)'),
+      .describe('Provider ID. Use provider list to choose one.'),
   }),
   options: z.object({
     chain: z
@@ -28,7 +28,6 @@ export const createCommand = {
     providerId: z.string(),
   }),
   examples: [
-    { description: 'Create dataset with interactive provider selection' },
     { args: { providerId: 1 }, description: 'Create dataset with provider #1' },
     {
       args: { providerId: 1 },

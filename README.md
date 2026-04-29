@@ -91,7 +91,7 @@ npx foc-cli wallet costs --extraBytes <n> --extraRunway <months>
 ```bash
 npx foc-cli dataset list                          # List all datasets
 npx foc-cli dataset details -d <id>               # Metadata + pieces
-npx foc-cli dataset create [providerId] [--cdn]   # Create dataset
+npx foc-cli dataset create <providerId> [--cdn]   # Create dataset
 npx foc-cli dataset upload <path> <providerId>    # Create + upload
 npx foc-cli dataset terminate <dataSetId>         # Terminate dataset
 ```

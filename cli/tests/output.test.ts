@@ -1,13 +1,15 @@
-import { describe, test, expect } from 'bun:test'
-import { deepSerialize } from '../src/output.ts'
-import { OutputContext } from '../src/output.ts'
+import { describe, expect, test } from 'bun:test'
+import { deepSerialize, OutputContext } from '../src/output.ts'
 
 describe('deepSerialize', () => {
   test('converts bigint to string', () => {
     expect(deepSerialize(42n)).toBe('42')
   })
   test('converts bigint in object', () => {
-    expect(deepSerialize({ id: 42n, name: 'test' })).toEqual({ id: '42', name: 'test' })
+    expect(deepSerialize({ id: 42n, name: 'test' })).toEqual({
+      id: '42',
+      name: 'test',
+    })
   })
   test('converts bigint in nested object', () => {
     expect(deepSerialize({ a: { b: 100n } })).toEqual({ a: { b: '100' } })
@@ -16,7 +18,10 @@ describe('deepSerialize', () => {
     expect(deepSerialize([1n, 2n, 3n])).toEqual(['1', '2', '3'])
   })
   test('converts bigint in array of objects', () => {
-    expect(deepSerialize([{ id: 1n }, { id: 2n }])).toEqual([{ id: '1' }, { id: '2' }])
+    expect(deepSerialize([{ id: 1n }, { id: 2n }])).toEqual([
+      { id: '1' },
+      { id: '2' },
+    ])
   })
   test('passes through primitives', () => {
     expect(deepSerialize('hello')).toBe('hello')
@@ -35,7 +40,7 @@ describe('OutputContext', () => {
   function mockContext(agent: boolean) {
     return {
       agent,
-      ok: (data: any, opts?: any) => opts ? { ...data, ...opts } : data,
+      ok: (data: any, opts?: any) => (opts ? { ...data, ...opts } : data),
       error: (err: any) => err,
     }
   }
@@ -58,9 +63,16 @@ describe('OutputContext', () => {
       const c = mockContext(true)
       const out = new OutputContext(c)
       out.step('Depositing')
-      const result = out.done({ status: 'ok' }, {
-        cta: { commands: [{ command: 'wallet balance', description: 'Check balance' }] },
-      })
+      const result = out.done(
+        { status: 'ok' },
+        {
+          cta: {
+            commands: [
+              { command: 'wallet balance', description: 'Check balance' },
+            ],
+          },
+        }
+      )
       expect(result.cta).toBeDefined()
       expect(result.cta.commands[0].command).toBe('wallet balance')
     })
@@ -71,11 +83,20 @@ describe('OutputContext', () => {
       out.step('Connecting')
       out.step('Submitting')
       const result = out.fail('TX_FAILED', 'insufficient funds', {
-        cta: { commands: [{ command: 'wallet fund', description: 'Get tokens' }] },
+        cta: {
+          commands: [{ command: 'wallet fund', description: 'Get tokens' }],
+        },
       })
       expect(result.error.code).toBe('TX_FAILED')
-      expect(result.processLog[0]).toEqual({ step: 'Connecting', status: 'done' })
-      expect(result.processLog[1]).toEqual({ step: 'Submitting', status: 'failed', error: 'insufficient funds' })
+      expect(result.processLog[0]).toEqual({
+        step: 'Connecting',
+        status: 'done',
+      })
+      expect(result.processLog[1]).toEqual({
+        step: 'Submitting',
+        status: 'failed',
+        error: 'insufficient funds',
+      })
     })
 
     test('fail with retryable flag', () => {
