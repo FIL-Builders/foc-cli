@@ -71,7 +71,7 @@ Every command supports `-h` for full usage details.
 ```bash
 npx foc-cli upload <path>                        # Upload with auto provider/dataset
 npx foc-cli upload <path> --withCDN --copies 3   # CDN + 3 redundant copies
-npx foc-cli multi-upload ./a.pdf,./b.pdf         # Batch upload
+npx foc-cli multi-upload ./a.pdf,./b.pdf         # Batch upload; all paths must be readable
 ```
 
 ### Wallet

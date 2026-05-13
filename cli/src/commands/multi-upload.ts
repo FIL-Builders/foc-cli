@@ -25,14 +25,14 @@ type CopyResult = {
 
 export const multiUploadCommand = {
   description:
-    'Upload multiple files to Filecoin warm storage (high-level, recommended)',
+    'Upload multiple readable files to Filecoin warm storage (high-level, recommended)',
   args: z.object({
     paths: z
       .preprocess(
         (val) => (typeof val === 'string' ? val.split(',') : val),
         z.array(z.string())
       )
-      .describe('File paths to upload (comma-separated for CLI)'),
+      .describe('File paths to upload. All paths must be readable.'),
   }),
   options: z.object({
     chain: z
@@ -72,7 +72,7 @@ export const multiUploadCommand = {
     {
       args: { paths: ['./myfile.pdf', './myfile2.pdf'] },
       options: { copies: 3, withCDN: true },
-      description: 'Upload with auto provider/dataset selection',
+      description: 'Upload readable files with auto provider/dataset selection',
     },
     {
       args: { paths: ['./data.bin', './data2.bin'] },
@@ -99,6 +99,25 @@ export const multiUploadCommand = {
       const fileResultsSettled = await Promise.allSettled(
         absolutePaths.map((filePath: string) => readFile(filePath))
       )
+      const fileReadRejected = fileResultsSettled
+        .map((result, index) => ({ result, path: absolutePaths[index] }))
+        .filter(({ result }) => result.status === 'rejected')
+
+      if (fileReadRejected.length > 0) {
+        return out.fail(
+          'FILE_READ_FAILED',
+          fileReadRejected
+            .map(({ result, path }) => {
+              const reason =
+                result.status === 'rejected' ? result.reason : undefined
+              return `${path}: ${
+                reason instanceof Error ? reason.message : String(reason)
+              }`
+            })
+            .join(', ')
+        )
+      }
+
       const fileResults = fileResultsSettled
         .filter((result) => result.status === 'fulfilled')
         .map((result) => result.value)
