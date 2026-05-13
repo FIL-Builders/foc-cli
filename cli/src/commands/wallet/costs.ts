@@ -23,10 +23,6 @@ export const costsCommand = {
   }),
   examples: [
     {
-      options: { extraBytes: 1000000 },
-      description: 'Get costs for uploading 1MB of data',
-    },
-    {
       options: { extraBytes: 1000000, extraRunway: 1 },
       description: 'Get costs for uploading 1MB with 1 month runway',
     },

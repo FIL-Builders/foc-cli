@@ -82,10 +82,7 @@ export const detailsCommand = {
           cid,
           scannerUrl: pieceScannerUrl(cid, chain),
           url: piece.url,
-          metadata:
-            Object.keys(piece.metadata).length > 0
-              ? piece.metadata
-              : 'No metadata',
+          metadata: piece.metadata,
         }
       })
 

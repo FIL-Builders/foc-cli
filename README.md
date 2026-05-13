@@ -71,7 +71,7 @@ Every command supports `-h` for full usage details.
 ```bash
 npx foc-cli upload <path>                        # Upload with auto provider/dataset
 npx foc-cli upload <path> --withCDN --copies 3   # CDN + 3 redundant copies
-npx foc-cli multi-upload ./a.pdf,./b.pdf         # Batch upload
+npx foc-cli multi-upload ./a.pdf,./b.pdf         # Batch upload; all paths must be readable
 ```
 
 ### Wallet
@@ -91,7 +91,7 @@ npx foc-cli wallet costs --extraBytes <n> --extraRunway <months>
 ```bash
 npx foc-cli dataset list                          # List all datasets
 npx foc-cli dataset details -d <id>               # Metadata + pieces
-npx foc-cli dataset create [providerId] [--cdn]   # Create dataset
+npx foc-cli dataset create <providerId> [--cdn]   # Create dataset
 npx foc-cli dataset upload <path> <providerId>    # Create + upload
 npx foc-cli dataset terminate <dataSetId>         # Terminate dataset
 ```
