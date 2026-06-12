@@ -115,7 +115,7 @@ afterEach(async () => {
 describe('top-level upload commands', () => {
   test('upload prepares storage, executes funding, uploads, and maps copy results', async () => {
     const filePath = await tempFile('upload.txt', 'data')
-    const contexts = [{ id: 'ctx-primary' }]
+    const contexts = [{ id: 'ctx-primary' }, { id: 'ctx-secondary' }]
     const execute = mock(async () => ({ hash: '0xprepare' }))
 
     synapseStorage.createContexts.mockImplementation(async () => contexts)
@@ -125,12 +125,116 @@ describe('top-level upload commands', () => {
     synapseStorage.upload.mockImplementation(async () => ({
       pieceCid: cid('baga-upload'),
       size: 4,
+      requestedCopies: 2,
+      complete: true,
+      copies: [
+        {
+          dataSetId: 42n,
+          retrievalUrl: 'https://provider.example/piece/baga-upload',
+          pieceId: 7n,
+          providerId: 77n,
+          isNewDataSet: true,
+          role: 'primary',
+        },
+        {
+          dataSetId: 43n,
+          retrievalUrl: 'https://backup.example/piece/baga-upload',
+          pieceId: 8n,
+          providerId: 79n,
+          isNewDataSet: false,
+          role: 'secondary',
+        },
+      ],
+      failedAttempts: [
+        {
+          providerId: 78n,
+          role: 'secondary',
+          error: 'replaced after transient failure',
+          explicit: false,
+        },
+      ],
+    }))
+
+    const result = await uploadCommand.run(
+      commandContext({
+        args: { path: filePath },
+        options: { copies: 2, withCDN: true },
+      })
+    )
+
+    expect(privateKeyClient).toHaveBeenCalledWith(314159)
+    expect(synapseConstructorArgs).toEqual([
+      { client: fakeWalletClient, source: 'foc-cli' },
+    ])
+    expect(synapseStorage.createContexts).toHaveBeenCalledWith({
+      copies: 2,
+      withCDN: true,
+    })
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      context: contexts,
+      dataSize: 4n,
+    })
+    expect(execute).toHaveBeenCalled()
+    expect(synapseStorage.upload).toHaveBeenCalledWith(expect.anything(), {
+      contexts,
+      withCDN: true,
+    })
+    expect(result.status).toBe('uploaded')
+    expect(result.result).toEqual({
+      pieceCid: 'baga-upload',
+      pieceScannerUrl: 'https://pdp.vxb.ai/calibration/piece/baga-upload',
+      size: 4,
+      requestedCopies: 2,
+      complete: true,
+      copyResults: [
+        {
+          dataSetId: '42',
+          datasetScannerUrl: 'https://pdp.vxb.ai/calibration/dataset/42',
+          url: 'https://provider.example/piece/baga-upload',
+          pieceId: '7',
+          providerId: '77',
+          isNewDataSet: true,
+          providerRole: 'primary',
+        },
+        {
+          dataSetId: '43',
+          datasetScannerUrl: 'https://pdp.vxb.ai/calibration/dataset/43',
+          url: 'https://backup.example/piece/baga-upload',
+          pieceId: '8',
+          providerId: '79',
+          isNewDataSet: false,
+          providerRole: 'secondary',
+        },
+      ],
+      copyFailures: [
+        {
+          providerId: '78',
+          role: 'secondary',
+          error: 'replaced after transient failure',
+          explicit: false,
+        },
+      ],
+    })
+  })
+
+  test('upload reports partial status when Synapse commits fewer copies than requested', async () => {
+    const filePath = await tempFile('partial.txt', 'data')
+    const contexts = [
+      { id: 'ctx-primary' },
+      { id: 'ctx-secondary-a' },
+      { id: 'ctx-secondary-b' },
+    ]
+
+    synapseStorage.createContexts.mockImplementation(async () => contexts)
+    synapseStorage.upload.mockImplementation(async () => ({
+      pieceCid: cid('baga-partial'),
+      size: 4,
       requestedCopies: 3,
       complete: false,
       copies: [
         {
           dataSetId: 42n,
-          retrievalUrl: 'https://provider.example/piece/baga-upload',
+          retrievalUrl: 'https://provider.example/piece/baga-partial',
           pieceId: 7n,
           providerId: 77n,
           isNewDataSet: true,
@@ -150,42 +254,20 @@ describe('top-level upload commands', () => {
     const result = await uploadCommand.run(
       commandContext({
         args: { path: filePath },
-        options: { copies: 3, withCDN: true },
+        options: { copies: 3 },
       })
     )
 
-    expect(privateKeyClient).toHaveBeenCalledWith(314159)
-    expect(synapseConstructorArgs).toEqual([
-      { client: fakeWalletClient, source: 'foc-cli' },
-    ])
-    expect(synapseStorage.createContexts).toHaveBeenCalledWith({
-      copies: 3,
-      withCDN: true,
-    })
-    expect(synapseStorage.prepare).toHaveBeenCalledWith({
-      context: contexts,
-      dataSize: 4n,
-    })
-    expect(execute).toHaveBeenCalled()
-    expect(synapseStorage.upload).toHaveBeenCalledWith(expect.anything(), {
-      contexts,
-      withCDN: true,
-    })
     expect(result.status).toBe('partially_uploaded')
-    expect(result.result).toEqual({
-      pieceCid: 'baga-upload',
-      pieceScannerUrl: 'https://pdp.vxb.ai/calibration/piece/baga-upload',
-      size: 4,
+    expect(result.result).toMatchObject({
+      pieceCid: 'baga-partial',
       requestedCopies: 3,
       complete: false,
       copyResults: [
         {
           dataSetId: '42',
-          datasetScannerUrl: 'https://pdp.vxb.ai/calibration/dataset/42',
-          url: 'https://provider.example/piece/baga-upload',
           pieceId: '7',
           providerId: '77',
-          isNewDataSet: true,
           providerRole: 'primary',
         },
       ],
