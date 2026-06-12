@@ -115,16 +115,16 @@ export const uploadCommand = {
       })
 
       const cidStr = result.pieceCid.toString()
-      const copyResults = result.copies.map((copy: any) => ({
-        dataSetId: copy.dataSetId,
+      const copyResults = result.copies.map((copy) => ({
+        dataSetId: copy.dataSetId.toString(),
         datasetScannerUrl: datasetScannerUrl(copy.dataSetId, chain),
         url: copy.retrievalUrl,
-        pieceId: copy.pieceId,
-        providerId: copy.providerId,
+        pieceId: copy.pieceId.toString(),
+        providerId: copy.providerId.toString(),
         isNewDataSet: copy.isNewDataSet,
         providerRole: copy.role,
       }))
-      const copyFailures = result.failedAttempts.map((failure: any) => ({
+      const copyFailures = result.failedAttempts.map((failure) => ({
         providerId: failure.providerId.toString(),
         role: failure.role,
         error: formatFailedAttemptError(failure),
