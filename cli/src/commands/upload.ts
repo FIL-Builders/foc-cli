@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { FailedAttempt } from '@filoz/synapse-sdk'
 import { Synapse } from '@filoz/synapse-sdk'
 import { z } from 'incur'
 import { privateKeyClient } from '../client.ts'
@@ -32,6 +33,8 @@ export const uploadCommand = {
       pieceCid: z.string(),
       pieceScannerUrl: z.string(),
       size: z.number(),
+      requestedCopies: z.number(),
+      complete: z.boolean(),
       copyResults: z.array(
         z.object({
           dataSetId: z.string(),
@@ -122,18 +125,20 @@ export const uploadCommand = {
         providerRole: copy.role,
       }))
       const copyFailures = result.failedAttempts.map((failure: any) => ({
-        providerId: failure.providerId,
+        providerId: failure.providerId.toString(),
         role: failure.role,
-        error: failure instanceof Error ? failure.message : String(failure),
-        explicit: failure.explicit,
+        error: formatFailedAttemptError(failure),
+        explicit: Boolean(failure.explicit),
       }))
 
       return out.done({
-        status: 'uploaded',
+        status: result.complete ? 'uploaded' : 'partially_uploaded',
         result: {
           pieceCid: cidStr,
           pieceScannerUrl: pieceScannerUrl(cidStr, chain),
           size: result.size,
+          requestedCopies: result.requestedCopies,
+          complete: result.complete,
           copyResults,
           copyFailures,
         },
@@ -143,4 +148,14 @@ export const uploadCommand = {
       return out.fail('UPLOAD_FAILED', (error as Error).message)
     }
   },
+}
+
+function formatFailedAttemptError(failure: FailedAttempt | Error | unknown) {
+  if (failure instanceof Error) return failure.message
+  if (failure && typeof failure === 'object' && 'error' in failure) {
+    const error = failure.error
+    if (error instanceof Error) return error.message
+    if (error !== undefined && error !== null) return String(error)
+  }
+  return String(failure)
 }
