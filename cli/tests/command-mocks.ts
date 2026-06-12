@@ -49,7 +49,8 @@ export const synapseStorage = {
   prepare: mock(async () => ({
     transaction: null,
     costs: {
-      rate: {
+      rates: {
+        perEpoch: 11n,
         perMonth: 111n,
       },
       depositNeeded: 222n,
@@ -164,7 +165,7 @@ export const waitForCreateDataSet = mock(async () => ({
 
 export const uploadPiece = mock(async () => undefined)
 export const findPiece = mock(async () => undefined)
-export const calculate = mock(() => cid('baga-calculated'))
+export const calculate = mock(async () => cid('baga-calculated'))
 
 export const createDataSetAndAddPieces = mock(async () => ({
   txHash: '0xdatasetupload',
@@ -192,13 +193,17 @@ export const terminateServiceSync = mock(async (_client: any, options: any) => {
 })
 
 export const getAccountSummary = mock(async () => ({
-  availableFunds: 1n,
-  totalLockup: 2n,
-  totalRateBasedLockup: 3n,
-  lockupRatePerMonth: 4n,
   funds: 5n,
+  availableFunds: 1n,
+  debt: 0n,
+  lockupRatePerEpoch: 6n,
+  lockupRatePerMonth: 4n,
+  totalLockup: 2n,
+  totalFixedLockup: 7n,
+  totalRateBasedLockup: 3n,
+  runwayInEpochs: 120n,
+  grossCoverageInEpochs: 240n,
   epoch: 100n,
-  fundedUntilEpoch: 220n,
 }))
 
 export const getBlockNumber = mock(async () => 123n)
@@ -307,7 +312,8 @@ export function resetCommandMocks() {
   synapseStorage.prepare.mockImplementation(async () => ({
     transaction: null,
     costs: {
-      rate: {
+      rates: {
+        perEpoch: 11n,
         perMonth: 111n,
       },
       depositNeeded: 222n,
@@ -338,7 +344,7 @@ export function resetCommandMocks() {
   }))
   uploadPiece.mockImplementation(async () => undefined)
   findPiece.mockImplementation(async () => undefined)
-  calculate.mockImplementation(() => cid('baga-calculated'))
+  calculate.mockImplementation(async () => cid('baga-calculated'))
   createDataSetAndAddPieces.mockImplementation(async () => ({
     txHash: '0xdatasetupload',
     statusUrl: 'https://provider.example/status',
@@ -363,13 +369,17 @@ export function resetCommandMocks() {
     }
   )
   getAccountSummary.mockImplementation(async () => ({
-    availableFunds: 1n,
-    totalLockup: 2n,
-    totalRateBasedLockup: 3n,
-    lockupRatePerMonth: 4n,
     funds: 5n,
+    availableFunds: 1n,
+    debt: 0n,
+    lockupRatePerEpoch: 6n,
+    lockupRatePerMonth: 4n,
+    totalLockup: 2n,
+    totalFixedLockup: 7n,
+    totalRateBasedLockup: 3n,
+    runwayInEpochs: 120n,
+    grossCoverageInEpochs: 240n,
     epoch: 100n,
-    fundedUntilEpoch: 220n,
   }))
   getBlockNumber.mockImplementation(async () => 123n)
   waitForTransactionReceipt.mockImplementation(async () => ({
