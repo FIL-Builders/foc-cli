@@ -387,6 +387,8 @@ describe('wallet commands', () => {
       dataSize: 1024n,
       extraRunwayEpochs: 172800n,
     })
+    expect(formatBalance).toHaveBeenNthCalledWith(1, { value: 111n })
+    expect(formatBalance).toHaveBeenNthCalledWith(2, { value: 222n })
     expect(result).toEqual({
       newPerMonthRate: 'formatted:111',
       depositNeeded: 'formatted:222',
@@ -513,15 +515,18 @@ describe('dataset commands', () => {
     )
 
     expect(calculate).toHaveBeenCalled()
+    const uploadedPieceCid = uploadPiece.mock.calls[0]?.[0]?.pieceCid
+    expect(uploadedPieceCid?.toString()).toBe('baga-calculated')
+    expect(uploadedPieceCid).not.toHaveProperty('then')
     expect(uploadPiece).toHaveBeenCalledWith({
       data: expect.any(Buffer),
       serviceURL: 'https://provider.example',
-      pieceCid: expect.anything(),
+      pieceCid: uploadedPieceCid,
     })
     expect(findPiece).toHaveBeenCalledWith({
-      pieceCid: expect.anything(),
+      pieceCid: uploadedPieceCid,
       serviceURL: 'https://provider.example',
-      retry: true,
+      poll: true,
     })
     expect(createDataSetAndAddPieces).toHaveBeenCalledWith(fakeWalletClient, {
       serviceURL: 'https://provider.example',
@@ -529,7 +534,7 @@ describe('dataset commands', () => {
       cdn: false,
       pieces: [
         {
-          pieceCid: expect.anything(),
+          pieceCid: uploadedPieceCid,
           metadata: { name: 'dataset-file.txt' },
         },
       ],

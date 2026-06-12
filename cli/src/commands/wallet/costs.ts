@@ -46,7 +46,7 @@ export const costsCommand = {
       })
 
       const newPerMonthRate = formatBalance({
-        value: prep.costs.rate.perMonth,
+        value: prep.costs.rates.perMonth,
       })
       const depositNeeded = formatBalance({ value: prep.costs.depositNeeded })
       const alreadyCovered = prep.costs.ready

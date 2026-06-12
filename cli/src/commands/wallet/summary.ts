@@ -57,13 +57,10 @@ export const summaryCommand = {
 }
 
 function formatTimeUntilFunded(summary: getAccountSummary.OutputType) {
-  const { fundedUntilEpoch, epoch } = summary
-  if (fundedUntilEpoch === maxUint256) {
+  if (summary.runwayInEpochs === maxUint256) {
     return 'No active storage, unlimited'
   }
-  const blocksUntilFunded =
-    fundedUntilEpoch < epoch ? 0n : fundedUntilEpoch - epoch
-  const secondsUntilFunded = blocksUntilFunded * 30n
+  const secondsUntilFunded = summary.runwayInEpochs * 30n
   const hoursUntilFunded = secondsUntilFunded / 60n / 60n
   const daysUntilFunded = hoursUntilFunded / 24n
   const weeksUntilFunded = daysUntilFunded / 7n
