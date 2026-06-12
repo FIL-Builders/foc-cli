@@ -60,7 +60,7 @@ export const uploadCommand = {
       const fileData = await readFile(absolutePath)
 
       out.step('Calculating piece CID')
-      const pieceCid = Piece.calculate(fileData)
+      const pieceCid = await Piece.calculate(fileData)
 
       out.step('Uploading to provider')
       await SP.uploadPiece({
@@ -71,7 +71,7 @@ export const uploadCommand = {
       await SP.findPiece({
         pieceCid,
         serviceURL: provider.pdp.serviceURL,
-        retry: true,
+        poll: true,
       })
 
       out.step('Creating dataset and adding pieces')
