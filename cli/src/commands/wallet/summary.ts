@@ -19,6 +19,7 @@ export const summaryCommand = {
     availableFunds: z.string(),
     timeRemaining: z.string(),
     totalLockup: z.string(),
+    rateBasedLockup: z.string(),
     monthlyAccountRate: z.string(),
     monthlyStorageRate: z.string(),
     funds: z.string(),
@@ -39,8 +40,11 @@ export const summaryCommand = {
         availableFunds: formatBalance({ value: summary.availableFunds }),
         timeRemaining,
         totalLockup: formatBalance({ value: summary.totalLockup }),
-        monthlyAccountRate: formatBalance({
+        rateBasedLockup: formatBalance({
           value: summary.totalRateBasedLockup,
+        }),
+        monthlyAccountRate: formatBalance({
+          value: summary.lockupRatePerMonth,
         }),
         monthlyStorageRate: formatBalance({
           value: summary.lockupRatePerMonth,

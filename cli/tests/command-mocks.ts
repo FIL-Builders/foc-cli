@@ -60,6 +60,8 @@ export const synapseStorage = {
   upload: mock(async () => ({
     pieceCid: cid('baga-upload'),
     size: 4,
+    requestedCopies: 0,
+    complete: true,
     copies: [],
     failedAttempts: [],
   })),

@@ -125,6 +125,8 @@ describe('top-level upload commands', () => {
     synapseStorage.upload.mockImplementation(async () => ({
       pieceCid: cid('baga-upload'),
       size: 4,
+      requestedCopies: 3,
+      complete: false,
       copies: [
         {
           dataSetId: 42n,
@@ -141,9 +143,6 @@ describe('top-level upload commands', () => {
           role: 'secondary',
           error: 'temporarily unavailable',
           explicit: false,
-          toString() {
-            return this.error
-          },
         },
       ],
     }))
@@ -172,11 +171,13 @@ describe('top-level upload commands', () => {
       contexts,
       withCDN: true,
     })
-    expect(result.status).toBe('uploaded')
+    expect(result.status).toBe('partially_uploaded')
     expect(result.result).toEqual({
       pieceCid: 'baga-upload',
       pieceScannerUrl: 'https://pdp.vxb.ai/calibration/piece/baga-upload',
       size: 4,
+      requestedCopies: 3,
+      complete: false,
       copyResults: [
         {
           dataSetId: '42',
@@ -426,7 +427,8 @@ describe('wallet commands', () => {
       availableFunds: 'formatted:1',
       timeRemaining: '1h 0d 0w 0m 0y',
       totalLockup: 'formatted:2',
-      monthlyAccountRate: 'formatted:3',
+      rateBasedLockup: 'formatted:3',
+      monthlyAccountRate: 'formatted:4',
       monthlyStorageRate: 'formatted:4',
       funds: 'formatted:5',
     })
