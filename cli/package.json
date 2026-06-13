@@ -1,6 +1,6 @@
 {
   "name": "foc-cli",
-  "version": "0.0.4",
+  "version": "0.1.1",
   "description": "CLI for Filecoin Onchain Cloud — decentralized storage on Filecoin with PDP verification and USDFC payments.",
   "type": "module",
   "main": "dist/src/index.js",
@@ -39,12 +39,12 @@
   "license": "Apache-2.0 OR MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FIL-Builders/foc-skill.git"
+    "url": "git+https://github.com/FIL-Builders/foc-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/FIL-Builders/foc-skill/issues"
+    "url": "https://github.com/FIL-Builders/foc-cli/issues"
   },
-  "homepage": "https://github.com/FIL-Builders/foc-skill#readme",
+  "homepage": "https://github.com/FIL-Builders/foc-cli#readme",
   "engines": {
     "node": ">=18"
   },
