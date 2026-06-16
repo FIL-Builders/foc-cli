@@ -5,6 +5,7 @@ import { Synapse } from '@filoz/synapse-sdk'
 import { z } from 'incur'
 import { privateKeyClient } from '../client.ts'
 import { OutputContext } from '../output.ts'
+import { selectHealthyProviders } from '../provider-selection.ts'
 import { datasetScannerUrl, hashLink, pieceScannerUrl } from '../utils.ts'
 
 export const uploadCommand = {
@@ -90,9 +91,25 @@ export const uploadCommand = {
 
       const synapse = new Synapse({ client, source: 'foc-cli' })
 
+      out.step('Checking provider health')
+      const selection = await selectHealthyProviders(
+        client,
+        c.options.copies ?? 2
+      )
+      if (selection.usedUnendorsedPrimary) {
+        out.info(
+          `No endorsed provider reachable — using approved provider ${selection.primaryName} for the primary copy.`
+        )
+      }
+      if (selection.reducedCopies) {
+        out.info(
+          `Storing ${selection.selectedCopies} of ${selection.requestedCopies} requested copies (${selection.reachableCount} of ${selection.approvedCount} providers reachable).`
+        )
+      }
+
       out.step('Creating storage contexts')
       const contexts = await synapse.storage.createContexts({
-        copies: c.options.copies,
+        providerIds: selection.providerIds,
         withCDN: c.options.withCDN,
       })
 

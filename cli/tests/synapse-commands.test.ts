@@ -10,6 +10,8 @@ import {
   createDataSetAndAddPieces,
   fakeProvider,
   fakeWalletClient,
+  fetchMock,
+  fetchProviderSelectionInput,
   findPiece,
   formatBalance,
   getAccountSummary,
@@ -66,6 +68,9 @@ const { listCommand: pieceListCommand } = await import(
 )
 const { removeCommand: pieceRemoveCommand } = await import(
   '../src/commands/piece/remove.ts'
+)
+const { selectHealthyProviders } = await import(
+  '../src/provider-selection.ts'
 )
 
 const tempDirs: string[] = []
@@ -177,8 +182,11 @@ describe('top-level upload commands', () => {
     expect(synapseConstructorArgs).toEqual([
       { client: fakeWalletClient, source: 'foc-cli' },
     ])
+    expect(fetchProviderSelectionInput).toHaveBeenCalledWith(fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+    })
     expect(synapseStorage.createContexts).toHaveBeenCalledWith({
-      copies: 2,
+      providerIds: [77n, 79n],
       withCDN: true,
     })
     expect(synapseStorage.prepare).toHaveBeenCalledWith({
@@ -882,5 +890,78 @@ describe('piece commands', () => {
     )
 
     expect(result.dataSetId).toBe('42')
+  })
+})
+
+describe('provider health selection', () => {
+  test('selects reachable endorsed providers first, primary first', async () => {
+    const selection = await selectHealthyProviders(fakeWalletClient, 2)
+
+    expect(fetchProviderSelectionInput).toHaveBeenCalledWith(fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+    })
+    expect(selection.providerIds).toEqual([77n, 79n])
+    expect(selection.usedUnendorsedPrimary).toBe(false)
+    expect(selection.reducedCopies).toBe(false)
+    expect(selection.reachableCount).toBe(3)
+  })
+
+  test('falls back to a reachable non-endorsed provider for the primary when no endorsed is reachable', async () => {
+    fetchProviderSelectionInput.mockImplementation(async () => ({
+      providers: [
+        {
+          id: 77n,
+          name: 'Endorsed',
+          pdp: { serviceURL: 'https://endorsed.example' },
+        },
+        {
+          id: 81n,
+          name: 'Approved',
+          pdp: { serviceURL: 'https://approved.example' },
+        },
+      ],
+      endorsedIds: [77n],
+      clientDataSets: [],
+    }))
+    // The only endorsed provider is down; the approved one answers.
+    fetchMock.mockImplementation(async (url: string | URL) =>
+      String(url).includes('endorsed.example')
+        ? new Response(null, { status: 503 })
+        : new Response(null, { status: 200 })
+    )
+
+    const selection = await selectHealthyProviders(fakeWalletClient, 1)
+
+    expect(selection.providerIds).toEqual([81n])
+    expect(selection.usedUnendorsedPrimary).toBe(true)
+    expect(selection.primaryName).toBe('Approved')
+    expect(selection.reducedCopies).toBe(false)
+  })
+
+  test('reduces copies when fewer providers are reachable than requested', async () => {
+    // Only provider 77 (https://provider.example) answers.
+    fetchMock.mockImplementation(async (url: string | URL) =>
+      String(url).includes('://provider.example')
+        ? new Response(null, { status: 200 })
+        : new Response(null, { status: 503 })
+    )
+
+    const selection = await selectHealthyProviders(fakeWalletClient, 3)
+
+    expect(selection.providerIds).toEqual([77n])
+    expect(selection.selectedCopies).toBe(1)
+    expect(selection.requestedCopies).toBe(3)
+    expect(selection.reducedCopies).toBe(true)
+    expect(selection.reachableCount).toBe(1)
+  })
+
+  test('throws a clear error when no provider is reachable', async () => {
+    fetchMock.mockImplementation(
+      async () => new Response(null, { status: 503 })
+    )
+
+    await expect(selectHealthyProviders(fakeWalletClient, 2)).rejects.toThrow(
+      /No reachable storage providers/
+    )
   })
 })
