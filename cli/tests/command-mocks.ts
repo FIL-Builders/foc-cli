@@ -6,7 +6,7 @@ export function cid(value: string) {
   }
 }
 
-export const fakeChain = {
+const fakeChain = {
   id: 314159,
   blockExplorers: {
     default: {
@@ -21,7 +21,7 @@ export const fakeWalletClient = {
   },
 }
 
-export const fakePublicClient = {
+const fakePublicClient = {
   name: 'public-client',
 }
 
@@ -55,6 +55,7 @@ export const synapseStorage = {
       },
       depositNeeded: 222n,
       ready: true,
+      needsFwssMaxApproval: false,
     },
   })),
   upload: mock(async () => ({
@@ -68,7 +69,7 @@ export const synapseStorage = {
 }
 
 export const synapseConstructorArgs: any[] = []
-export class Synapse {
+class Synapse {
   client: { waitForTransactionReceipt: typeof synapseWaitForTransactionReceipt }
   payments: typeof synapsePayments
   storage: typeof synapseStorage
@@ -92,7 +93,7 @@ export const privateKeyClient = mock(() => ({
 
 export const publicClient = mock(() => fakePublicClient)
 
-export const getChain = mock((chainId: number) => ({
+const getChain = mock((chainId: number) => ({
   ...fakeChain,
   id: chainId,
 }))
@@ -127,7 +128,43 @@ export const fakeProvider = {
 export const getPDPProvider = mock(async () => fakeProvider)
 export const getApprovedPDPProviders = mock(async () => [fakeProvider])
 
-export const fakeDataSet = {
+// Provider universe for pre-flight health selection. Three endorsed, reachable
+// providers so `--copies` up to 3 resolves without a shortfall.
+export const fakeProviderSelectionInput = {
+  providers: [
+    {
+      id: 77n,
+      name: 'Provider 77',
+      pdp: { serviceURL: 'https://provider.example' },
+    },
+    {
+      id: 79n,
+      name: 'Provider 79',
+      pdp: { serviceURL: 'https://provider79.example' },
+    },
+    {
+      id: 80n,
+      name: 'Provider 80',
+      pdp: { serviceURL: 'https://provider80.example' },
+    },
+  ],
+  endorsedIds: [77n, 79n, 80n],
+  clientDataSets: [],
+}
+
+export const fetchProviderSelectionInput = mock(
+  async () => fakeProviderSelectionInput
+)
+
+// Provider health checks GET {serviceURL}/pdp/ping via global fetch; mock it so
+// every provider answers 200 (reachable) by default.
+export const fetchMock = mock(
+  async (_url: string | URL): Promise<Response> =>
+    new Response(null, { status: 200 })
+)
+globalThis.fetch = fetchMock as unknown as typeof fetch
+
+const fakeDataSet = {
   dataSetId: 42n,
   clientDataSetId: 100n,
   provider: fakeProvider,
@@ -144,7 +181,7 @@ export const fakeDataSet = {
 export const getPdpDataSets = mock(async () => [fakeDataSet])
 export const getPdpDataSet = mock(async () => fakeDataSet)
 
-export const fakePiece = {
+const fakePiece = {
   id: 7n,
   cid: cid('baga-piece'),
   url: 'https://provider.example/piece/baga-piece',
@@ -155,10 +192,12 @@ export const fakePiece = {
 
 export const getPiecesWithMetadata = mock(async () => ({
   pieces: [fakePiece],
+  hasMore: false,
 }))
 
 export const createDataSet = mock(async () => ({
   txHash: '0xcreate',
+  statusUrl: 'https://provider.example/status',
 }))
 
 export const waitForCreateDataSet = mock(async () => ({
@@ -244,6 +283,7 @@ mock.module('@filoz/synapse-core/warm-storage', () => ({
   getPdpDataSet,
   getPdpDataSets,
   terminateServiceSync,
+  fetchProviderSelectionInput,
 }))
 
 mock.module('@filoz/synapse-core/pdp-verifier', () => ({
@@ -320,6 +360,7 @@ export function resetCommandMocks() {
       },
       depositNeeded: 222n,
       ready: true,
+      needsFwssMaxApproval: false,
     },
   }))
   synapseStorage.upload.mockImplementation(async () => ({
@@ -332,14 +373,22 @@ export function resetCommandMocks() {
 
   getPDPProvider.mockImplementation(async () => fakeProvider)
   getApprovedPDPProviders.mockImplementation(async () => [fakeProvider])
+  fetchProviderSelectionInput.mockImplementation(
+    async () => fakeProviderSelectionInput
+  )
+  fetchMock.mockImplementation(
+    async () => new Response(null, { status: 200 })
+  )
   getPdpDataSets.mockImplementation(async () => [fakeDataSet])
   getPdpDataSet.mockImplementation(async () => fakeDataSet)
   getPiecesWithMetadata.mockImplementation(async () => ({
     pieces: [fakePiece],
+    hasMore: false,
   }))
 
   createDataSet.mockImplementation(async () => ({
     txHash: '0xcreate',
+    statusUrl: 'https://provider.example/status',
   }))
   waitForCreateDataSet.mockImplementation(async () => ({
     dataSetId: 42n,

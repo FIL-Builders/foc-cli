@@ -568,7 +568,10 @@ describe('dataset commands', () => {
       serviceURL: 'https://provider.example',
       cdn: true,
     })
-    expect(waitForCreateDataSet).toHaveBeenCalledWith({ txHash: '0xcreate' })
+    expect(waitForCreateDataSet).toHaveBeenCalledWith({
+      txHash: '0xcreate',
+      statusUrl: 'https://provider.example/status',
+    })
     expect(result).toMatchObject({
       dataSetId: '42',
       scannerUrl: 'https://pdp.vxb.ai/calibration/dataset/42',
