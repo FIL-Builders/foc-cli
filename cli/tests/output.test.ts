@@ -48,7 +48,9 @@ describe('OutputContext', () => {
         error: {
           code: opts.code,
           message: opts.message,
-          ...(opts.retryable !== undefined ? { retryable: opts.retryable } : {}),
+          ...(opts.retryable !== undefined
+            ? { retryable: opts.retryable }
+            : {}),
         },
         ...(opts.cta ? { cta: opts.cta } : {}),
       }),

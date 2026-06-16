@@ -389,9 +389,7 @@ export function resetCommandMocks() {
   fetchProviderSelectionInput.mockImplementation(
     async () => fakeProviderSelectionInput
   )
-  fetchMock.mockImplementation(
-    async () => new Response(null, { status: 200 })
-  )
+  fetchMock.mockImplementation(async () => new Response(null, { status: 200 }))
   getPdpDataSets.mockImplementation(async () => [fakeDataSet])
   getPdpDataSet.mockImplementation(async () => fakeDataSet)
   getPiecesWithMetadata.mockImplementation(async () => ({

@@ -70,9 +70,7 @@ const { listCommand: pieceListCommand } = await import(
 const { removeCommand: pieceRemoveCommand } = await import(
   '../src/commands/piece/remove.ts'
 )
-const { selectHealthyProviders } = await import(
-  '../src/provider-selection.ts'
-)
+const { selectHealthyProviders } = await import('../src/provider-selection.ts')
 const { synapseClient } = await import('../src/synapse.ts')
 
 const tempDirs: string[] = []
