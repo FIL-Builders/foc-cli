@@ -13,6 +13,14 @@ export const detailsCommand = {
       .number()
       .default(314159)
       .describe('Chain ID. 314159 = Calibration, 314 = Mainnet'),
+    offset: z.coerce
+      .number()
+      .default(0)
+      .describe('Piece offset to start from (for pagination)'),
+    limit: z.coerce
+      .number()
+      .default(100)
+      .describe('Max pieces per page (defaults to 100)'),
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c', dataSetId: 'd' },
@@ -38,6 +46,8 @@ export const detailsCommand = {
         metadata: z.record(z.string(), z.string()),
       })
     ),
+    hasMore: z.boolean(),
+    nextOffset: z.number().optional(),
   }),
   async run(c: any) {
     const out = new OutputContext(c)
@@ -56,10 +66,15 @@ export const detailsCommand = {
         )
       }
 
+      const offset = c.options.offset ?? 0
+      const limit = c.options.limit ?? 100
+
       out.step('Fetching pieces and metadata')
-      const { pieces } = await getPiecesWithMetadata(client, {
+      const { pieces, hasMore } = await getPiecesWithMetadata(client, {
         dataSet: ds,
         address: client.account.address,
+        offset: BigInt(offset),
+        limit: BigInt(limit),
       })
 
       const dataset = {
@@ -86,11 +101,32 @@ export const detailsCommand = {
         }
       })
 
+      const nextOffset = offset + piecesList.length
+      const nextPage = hasMore
+        ? [
+            {
+              command: 'dataset details',
+              options: {
+                dataSetId: c.options.dataSetId,
+                offset: nextOffset,
+                limit,
+              },
+              description: `Show the next page of pieces (offset ${nextOffset})`,
+            },
+          ]
+        : []
+
       return out.done(
-        { dataset, pieces: piecesList },
+        {
+          dataset,
+          pieces: piecesList,
+          hasMore,
+          ...(hasMore ? { nextOffset } : {}),
+        },
         {
           cta: {
             commands: [
+              ...nextPage,
               {
                 command: 'piece remove',
                 description: 'Remove a piece from this dataset',

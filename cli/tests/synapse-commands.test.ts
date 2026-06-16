@@ -684,6 +684,8 @@ describe('dataset commands', () => {
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
       dataSet: expect.anything(),
       address: fakeWalletClient.account.address,
+      offset: 0n,
+      limit: 100n,
     })
     expect(result.dataset).toMatchObject({
       dataSetId: '42',
@@ -706,6 +708,7 @@ describe('dataset commands', () => {
         metadata: { name: 'file.txt' },
       },
     ])
+    expect(result.hasMore).toBe(false)
   })
 
   test('dataset terminate calls Synapse Core and maps the termination event', async () => {
@@ -734,6 +737,7 @@ describe('dataset commands', () => {
           metadata: {},
         },
       ],
+      hasMore: false,
     }))
 
     const result = await datasetDetailsCommand.run(
@@ -750,6 +754,38 @@ describe('dataset commands', () => {
       },
     ])
   })
+
+  test('dataset details paginates and emits a next-page CTA when more pieces remain', async () => {
+    getPiecesWithMetadata.mockImplementationOnce(async () => ({
+      pieces: [
+        {
+          id: 7n,
+          cid: cid('baga-page1'),
+          url: 'https://provider.example/piece/baga-page1',
+          metadata: { name: 'file.txt' },
+        },
+      ],
+      hasMore: true,
+    }))
+
+    const result = await datasetDetailsCommand.run(
+      commandContext({ options: { dataSetId: 42, offset: 5, limit: 1 } })
+    )
+
+    expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
+      dataSet: expect.anything(),
+      address: fakeWalletClient.account.address,
+      offset: 5n,
+      limit: 1n,
+    })
+    expect(result.hasMore).toBe(true)
+    expect(result.nextOffset).toBe(6)
+    expect(result.cta.commands).toContainEqual({
+      command: 'dataset details',
+      options: { dataSetId: 42, offset: 6, limit: 1 },
+      description: 'Show the next page of pieces (offset 6)',
+    })
+  })
 })
 
 describe('piece commands', () => {
@@ -764,6 +800,8 @@ describe('piece commands', () => {
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
       dataSet: expect.anything(),
       address: fakeWalletClient.account.address,
+      offset: 0n,
+      limit: 100n,
     })
     expect(result).toMatchObject({
       dataSetId: '42',
@@ -776,6 +814,43 @@ describe('piece commands', () => {
           metadata: { name: 'file.txt' },
         },
       ],
+    })
+    expect(result.hasMore).toBe(false)
+  })
+
+  test('piece list paginates and emits a next-page CTA when more pieces remain', async () => {
+    getPiecesWithMetadata.mockImplementationOnce(async () => ({
+      pieces: [
+        {
+          id: 7n,
+          cid: cid('baga-page1'),
+          url: 'https://provider.example/piece/baga-page1',
+          metadata: { name: 'file.txt' },
+        },
+      ],
+      hasMore: true,
+    }))
+
+    const result = await pieceListCommand.run(
+      commandContext({
+        args: { dataSetId: 42 },
+        options: { offset: 5, limit: 1 },
+      })
+    )
+
+    expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
+      dataSet: expect.anything(),
+      address: fakeWalletClient.account.address,
+      offset: 5n,
+      limit: 1n,
+    })
+    expect(result.hasMore).toBe(true)
+    expect(result.nextOffset).toBe(6)
+    expect(result.cta.commands).toContainEqual({
+      command: 'piece list',
+      args: { dataSetId: 42 },
+      options: { offset: 6, limit: 1 },
+      description: 'Show the next page of pieces (offset 6)',
     })
   })
 
