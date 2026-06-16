@@ -87,8 +87,19 @@ function commandContext({
     ok(data: any) {
       return data
     },
-    error(data: any) {
-      return data
+    // Mirror incur's run-context error(): reads code/message/retryable/cta off
+    // the top level and rebuilds the { error } envelope (not a verbatim echo).
+    error(opts: any) {
+      return {
+        error: {
+          code: opts.code,
+          message: opts.message,
+          ...(opts.retryable !== undefined
+            ? { retryable: opts.retryable }
+            : {}),
+        },
+        ...(opts.cta ? { cta: opts.cta } : {}),
+      }
     },
   }
 }

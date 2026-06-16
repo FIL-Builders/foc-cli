@@ -108,12 +108,17 @@ export class OutputContext {
       p.log.error(message)
     }
 
-    const error: any = { code, message }
-    if (opts?.retryable) error.retryable = true
-
-    const result: any = { error, processLog: this.log }
-    if (opts?.cta) result.cta = opts.cta
-
-    return this.c.error(result)
+    // incur's run-context `error()` reads `code`/`message`/`retryable`/`cta`
+    // off the TOP LEVEL of its argument and rebuilds the `{ ok:false, error }`
+    // envelope itself. Passing a nested `{ error }` made incur read `undefined`
+    // and render every failure as `code: null, message: null`, hiding the real
+    // cause. (incur's error envelope has no slot for processLog, so the step
+    // trail is only surfaced on success.)
+    return this.c.error({
+      code,
+      message,
+      ...(opts?.retryable ? { retryable: true } : {}),
+      ...(opts?.cta ? { cta: opts.cta } : {}),
+    })
   }
 }
