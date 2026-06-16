@@ -1,9 +1,8 @@
 import { claimTokens, formatBalance } from '@filoz/synapse-core/utils'
-import { Synapse } from '@filoz/synapse-sdk'
 import { z } from 'incur'
 import { waitForTransactionReceipt } from 'viem/actions'
-import { privateKeyClient } from '../../client.ts'
 import { OutputContext } from '../../output.ts'
+import { synapseClient } from '../../synapse.ts'
 
 export const fundCommand = {
   description: 'Request testnet FIL and USDFC from faucet (testnet only)',
@@ -21,7 +20,7 @@ export const fundCommand = {
   hint: 'Only works on Calibration testnet (chain 314159).',
   async run(c: any) {
     const out = new OutputContext(c)
-    const { client } = privateKeyClient(c.options.chain)
+    const { client, synapse } = synapseClient(c.options.chain)
 
     try {
       out.step('Requesting faucet tokens')
@@ -31,7 +30,6 @@ export const fundCommand = {
       await waitForTransactionReceipt(client, { hash: hashes[0].tx_hash })
 
       out.step('Fetching updated balances')
-      const synapse = new Synapse({ client, source: 'foc-cli' })
       const filBalance = await synapse.payments.walletBalance()
       const usdfcBalance = await synapse.payments.walletBalance({
         token: 'USDFC',

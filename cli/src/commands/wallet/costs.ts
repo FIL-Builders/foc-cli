@@ -1,8 +1,7 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
-import { Synapse } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { privateKeyClient } from '../../client.ts'
 import { OutputContext } from '../../output.ts'
+import { synapseClient } from '../../synapse.ts'
 
 export const costsCommand = {
   description: 'Get costs for uploading a file to Filecoin warm storage',
@@ -34,12 +33,10 @@ export const costsCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
-    const { client } = privateKeyClient(c.options.chain)
+    const { synapse } = synapseClient(c.options.chain)
 
     try {
       out.step('Getting costs')
-
-      const synapse = new Synapse({ client, source: 'foc-cli' })
 
       const prep = await synapse.storage.prepare({
         dataSize: BigInt(c.options.extraBytes),

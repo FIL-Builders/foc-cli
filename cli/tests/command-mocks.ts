@@ -252,6 +252,15 @@ export const waitForTransactionReceipt = mock(async () => ({
   status: 'success',
 }))
 
+export const configStore = {
+  path: '/tmp/foc-cli-test-config.json',
+  get: mock((_key: string): string | undefined => undefined),
+  set: mock((_key: string, _value: string) => {}),
+  delete: mock((_key: string) => {}),
+}
+
+mock.module('../src/config.ts', () => ({ default: configStore }))
+
 mock.module('../src/client.ts', () => ({
   privateKeyClient,
   publicClient,
@@ -316,6 +325,10 @@ mock.module('viem/actions', () => ({
 export function resetCommandMocks() {
   mock.clearAllMocks()
   synapseConstructorArgs.length = 0
+
+  configStore.get.mockImplementation(() => undefined)
+  configStore.set.mockImplementation(() => {})
+  configStore.delete.mockImplementation(() => {})
 
   privateKeyClient.mockImplementation(() => ({
     client: fakeWalletClient,

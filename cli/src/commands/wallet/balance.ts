@@ -1,8 +1,8 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
-import { Synapse, TOKENS } from '@filoz/synapse-sdk'
+import { TOKENS } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { privateKeyClient } from '../../client.ts'
 import { OutputContext } from '../../output.ts'
+import { synapseClient } from '../../synapse.ts'
 
 export const balanceCommand = {
   description: 'Check FIL and USDFC wallet balances and payment account info',
@@ -29,11 +29,11 @@ export const balanceCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
-    const { client } = privateKeyClient(c.options.chain)
+    const { client, synapse } = synapseClient(c.options.chain)
 
     try {
       out.step('Checking wallet balance')
-      const result = await fetchBalances(client)
+      const result = await fetchBalances(client, synapse)
 
       return out.done(result)
     } catch (error) {
@@ -42,8 +42,7 @@ export const balanceCommand = {
   },
 }
 
-async function fetchBalances(client: any) {
-  const synapse = new Synapse({ client, source: 'foc-cli' })
+async function fetchBalances(client: any, synapse: any) {
   const filBalance = await synapse.payments.walletBalance()
   const usdfcBalance = await synapse.payments.walletBalance({
     token: TOKENS.USDFC,
