@@ -20,6 +20,7 @@ export const costsCommand = {
     newPerMonthRate: z.string(),
     depositNeeded: z.string(),
     alreadyCovered: z.boolean(),
+    needsFwssMaxApproval: z.boolean(),
   }),
   examples: [
     {
@@ -50,8 +51,14 @@ export const costsCommand = {
       })
       const depositNeeded = formatBalance({ value: prep.costs.depositNeeded })
       const alreadyCovered = prep.costs.ready
+      const needsFwssMaxApproval = prep.costs.needsFwssMaxApproval
 
-      return out.done({ newPerMonthRate, depositNeeded, alreadyCovered })
+      return out.done({
+        newPerMonthRate,
+        depositNeeded,
+        alreadyCovered,
+        needsFwssMaxApproval,
+      })
     } catch (error) {
       if (c.options.debug) console.error(error)
       return out.fail('COSTS_FAILED', (error as Error).message)

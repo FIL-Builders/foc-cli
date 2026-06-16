@@ -487,6 +487,7 @@ describe('wallet commands', () => {
       newPerMonthRate: 'formatted:111',
       depositNeeded: 'formatted:222',
       alreadyCovered: true,
+      needsFwssMaxApproval: false,
       processLog: [{ step: 'Getting costs', status: 'done' }],
     })
   })
@@ -522,7 +523,6 @@ describe('wallet commands', () => {
       totalLockup: 'formatted:2',
       rateBasedLockup: 'formatted:3',
       monthlyAccountRate: 'formatted:4',
-      monthlyStorageRate: 'formatted:4',
       funds: 'formatted:5',
     })
   })
