@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Cli } from 'incur'
+import packageJson from '../package.json' with { type: 'json' }
 import { dataset } from './commands/dataset/index.ts'
 import { docsCommand } from './commands/docs.ts'
 import { multiUploadCommand } from './commands/multi-upload.ts'
@@ -9,7 +10,7 @@ import { uploadCommand } from './commands/upload.ts'
 import { wallet } from './commands/wallet/index.ts'
 
 const cli = Cli.create('foc-cli', {
-  version: '0.0.4',
+  version: packageJson.version,
   description:
     'CLI for Filecoin Onchain Cloud — decentralized storage on Filecoin with PDP verification and USDFC payments.',
   sync: {
