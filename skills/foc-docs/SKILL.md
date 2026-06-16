@@ -1,6 +1,6 @@
 ---
 name: foc-docs
-description: Search and fetch Filecoin Onchain Cloud documentation. Use when looking up Synapse SDK APIs, storage guides, payment operations, PDP concepts, or any FOC reference material. Triggers on "docs", "documentation", "how to", "guide", "reference", "API", "Synapse SDK docs".
+description: Search and fetch Filecoin Onchain Cloud documentation with `npx foc-cli docs`. Use when the user wants to look up or understand FOC / Synapse SDK reference material — storage and payment guides, PDP concepts, session keys, React hooks, API signatures, or "how does X work" questions — rather than execute a storage operation. Reach for this whenever the user asks how something in FOC/Synapse works, needs an API signature or doc link, or is researching before building. Triggers on "foc docs", "filecoin cloud docs", "synapse docs", "how does ... work", "how to", "guide", "reference", "API". To actually run commands (upload, wallet, dataset, piece), use the foc-cli skill instead.
 ---
 
 # foc-docs — Documentation Search
@@ -9,7 +9,7 @@ Fast, filtered access to **Filecoin Onchain Cloud** docs via `npx foc-cli docs`.
 
 ## How It Works
 
-Searches a curated index of ~28 doc pages (from 1300+ raw entries). When your search narrows to 1-3 matches, it **auto-fetches** the top result in a single call.
+Builds a curated, depth-filtered index live from the docs site's `llms.txt` (dropping the bulk of deep API-reference entries), then ranks it against your `--prompt`. When the search narrows to 1-3 matches it **auto-fetches** the top result in the same call — so a good prompt usually answers the question in one round-trip instead of guessing URLs.
 
 ## Command
 
@@ -51,6 +51,8 @@ npx foc-cli docs --url <url> --maxDepth 2      # high-level only
 ```
 
 ## Doc Map
+
+Common entry points — handy shortcuts, not an exhaustive list. The docs evolve, so if a prompt below returns nothing, fall back to a plain `--prompt` search (the live index is the source of truth).
 
 | Topic | Prompt | URL (relative to `docs.filecoin.cloud/developer-guides/`) |
 |-------|--------|-----------------------------------------------------------|

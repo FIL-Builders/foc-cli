@@ -21,7 +21,7 @@
     "prepublishOnly": "rm -rf dist && tsc && cp ../README.md ../LICENSE . && cp -r ../skills .",
     "postpublish": "rm -f README.md LICENSE && rm -rf skills",
     "test": "bun test",
-    "lint": "tsc --noEmit && biome check --fix src/"
+    "lint": "tsc --noEmit && biome check --fix src/ tests/"
   },
   "keywords": [
     "filecoin",
@@ -46,15 +46,14 @@
   },
   "homepage": "https://github.com/FIL-Builders/foc-cli#readme",
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
     "@clack/prompts": "^1.0.0",
     "@filoz/synapse-core": "^0.7.0",
     "@filoz/synapse-sdk": "^1.0.1",
-    "@remix-run/fs": "^0.4.1",
     "conf": "^15.0.2",
-    "incur": "^0.3.1",
+    "incur": "^0.4.8",
     "terminal-link": "^5.0.0",
     "viem": "^2.47.1"
   },

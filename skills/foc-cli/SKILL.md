@@ -1,6 +1,6 @@
 ---
 name: foc-cli
-description: Use when working with Filecoin Onchain Cloud, the foc-cli CLI, Synapse SDK, storing files on Filecoin, PDP datasets, USDFC payments, or any decentralized cloud storage task on Filecoin. Triggers on "foc", "filecoin cloud", "synapse", "warm storage", "PDP", "USDFC", "foc-cli", "upload", "store", "wallet", "deposit", "dataset", "piece", "provider".
+description: Use when performing Filecoin Onchain Cloud storage or payment operations from the command line with foc-cli — uploading/storing files on Filecoin, managing PDP datasets and pieces, funding a wallet, depositing or withdrawing USDFC, estimating costs, or listing providers via the Synapse SDK stack. Reach for this whenever the user wants to actually run or execute an FOC/Synapse storage action, even if they don't name the tool. Triggers on "foc", "foc-cli", "filecoin cloud", "synapse", "warm storage", "PDP", "USDFC", "upload to filecoin", "store on filecoin", "wallet", "deposit", "withdraw", "dataset", "piece", "provider". For looking up documentation or SDK reference (rather than running a command), use the foc-docs skill instead.
 ---
 
 # foc-cli — Filecoin Onchain Cloud CLI
@@ -22,7 +22,7 @@ FOC turns Filecoin into a **programmable cloud** with four layers:
 
 **Data model:** Files → **Pieces** (by CID) → grouped into **Data Sets** on PDP providers → funded by **Payment Rails** (continuous USDFC streams).
 
-**Pricing:** $2.5/TiB/month/copy (min 2 copies), minimum 0.06 USDFC/month (~24 GiB).
+**Pricing (Synapse v1, per-operation):** storage is billed as a size-based rate per copy per month **plus a flat per-data-set monthly fee** — v1 removed the old fixed per-account minimum, so there is no single "minimum/month" number anymore. Default is 2 copies. Don't hardcode a price from memory: run `wallet costs --extraBytes <n> --extraRunway <months>` for the live rate, deposit needed, and whether an operator approval is still required. Treat that command as the source of truth.
 
 ## Setup
 
@@ -30,19 +30,22 @@ FOC turns Filecoin into a **programmable cloud** with four layers:
 npx foc-cli wallet init --auto   # generate wallet (or --keystore <path>, --privateKey <key>)
 ```
 
-Config: `~/Library/Preferences/foc-cli/config.json` (macOS). Keys: `privateKey`, `keystore`.
+Config: `~/Library/Preferences/foc-cli/config.json` (macOS). Keys: `privateKey`, `keystore`, `source`.
+
+**Source tag:** `source` is the tag the CLI reports to Synapse/Warm Storage (telemetry & attribution). Set it with `wallet init --source <name>` (persisted in config); defaults to `foc-cli`.
 
 ## Self-Documenting
 
-Every command supports `-h` for full usage, args, options, and examples:
+Every command supports `-h` for full usage, args, options, and examples, and `--schema` for the machine-readable JSON Schema of its args/options/output:
 
 ```bash
 npx foc-cli --help             # all commands
 npx foc-cli upload -h          # upload args/options/examples
 npx foc-cli wallet deposit -h  # deposit args/options
+npx foc-cli dataset details --schema   # full JSON Schema for a command
 ```
 
-**Always use `-h` first** to discover the exact interface before running a command.
+**Use `-h` (or `--schema`) first** to discover the exact interface before running a command. The CLI is self-describing, so if anything in this file ever disagrees with the live `-h`/`--schema` output, trust the CLI — it is the source of truth, and the tables below are just a fast map.
 
 ## Global Options
 
@@ -52,7 +55,7 @@ All commands accept these — not repeated per-command below:
 |--------|---------|-------------|
 | `--chain <id>` / `-c` | `314159` | `314159` = Calibration testnet, `314` = Mainnet |
 | `--debug` | `false` | Verbose error logging with stack traces |
-| `--format <fmt>` | `toon` | Output: `toon`, `json`, `yaml`, `md` |
+| `--format <fmt>` | `toon` | Output: `toon`, `json`, `yaml`, `md`, `jsonl` |
 | `--json` | | Shorthand for `--format json` |
 | `-h` / `--help` | | Show help for any command |
 
@@ -81,14 +84,14 @@ npx foc-cli multi-upload ./a.pdf,./b.pdf         # all paths must be readable
 | `wallet deposit <amount>` | Deposit USDFC into payment account |
 | `wallet withdraw <amount>` | Withdraw USDFC from payment account |
 | `wallet summary` | Account summary with funding timeline |
-| `wallet costs --extraBytes N --extraRunway N` | Calculate upload costs + deposit needed |
+| `wallet costs --extraBytes N --extraRunway N` | Live upload cost: per-month rate, `depositNeeded`, `alreadyCovered`, and `needsFwssMaxApproval` (true = funds suffice but a one-time operator approval is still required) |
 
 ### Dataset Management
 
 | Command | Description |
 |---------|-------------|
 | `dataset list` | All datasets with provider, CDN status, state |
-| `dataset details -d <id>` | Dataset metadata + all pieces |
+| `dataset details -d <id> [--offset N] [--limit M]` | Dataset metadata + pieces. Lists up to `--limit` pieces (default 100) starting at `--offset`; when more remain it returns `hasMore` + `nextOffset` and a CTA with the exact next-page command |
 | `dataset create <providerId> [--cdn]` | Create dataset with a provider from `provider list` |
 | `dataset upload <path> <providerId> [--cdn]` | Create dataset + upload in one step |
 | `dataset terminate <dataSetId>` | Stop PDP service for a dataset |
@@ -97,7 +100,7 @@ npx foc-cli multi-upload ./a.pdf,./b.pdf         # all paths must be readable
 
 | Command | Description |
 |---------|-------------|
-| `piece list <dataSetId>` | Pieces in dataset with CID + metadata |
+| `piece list <dataSetId> [--offset N] [--limit M]` | Pieces in dataset with CID + metadata. Paginated (default 100/page); when `hasMore` is true, follow the returned next-page CTA (`--offset <nextOffset>`) to fetch the rest |
 | `piece remove <dataSetId> <pieceId>` | Remove piece from dataset |
 
 ### Provider Info
@@ -132,6 +135,7 @@ npx foc-cli wallet costs --extraBytes 1000000 --extraRunway 1  # check costs fir
 npx foc-cli dataset list
 npx foc-cli dataset details -d 42
 npx foc-cli piece list 42
+npx foc-cli piece list 42 --offset 100 --limit 100   # next page when hasMore is true
 npx foc-cli piece remove 42 7
 npx foc-cli dataset terminate 42
 ```

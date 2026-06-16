@@ -8,11 +8,15 @@ const schema = {
   privateKey: {
     type: 'string',
   },
+  source: {
+    type: 'string',
+  },
 }
 
 const config = new Conf<{
   privateKey: string
   keystore: string
+  source: string
 }>({
   projectName: packageJson.name,
   projectVersion: packageJson.version,

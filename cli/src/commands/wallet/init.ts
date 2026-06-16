@@ -15,6 +15,12 @@ export const initCommand = {
       .optional()
       .describe('Path to a Foundry keystore file (requires foundry)'),
     privateKey: z.string().optional().describe('Private key (0x-prefixed hex)'),
+    source: z
+      .string()
+      .optional()
+      .describe(
+        'Source tag reported to Synapse/Warm Storage for telemetry (default: foc-cli)'
+      ),
   }),
   alias: { auto: 'a' },
   examples: [
@@ -28,10 +34,18 @@ export const initCommand = {
       options: { privateKey: '0x...' },
       description: 'Set private key directly',
     },
+    {
+      options: { auto: true, source: 'my-app' },
+      description: 'Generate a key and set the source tag',
+    },
   ],
   async run(c: any) {
     const out = new OutputContext(c)
     const agent = isAgent(c)
+
+    if (c.options.source) {
+      config.set('source', c.options.source)
+    }
 
     if (c.options.keystore) {
       if (existsSync(c.options.keystore)) {
@@ -75,6 +89,7 @@ export const initCommand = {
       return out.done({
         status: 'already_configured',
         configPath: config.path,
+        source: config.get('source') ?? 'foc-cli',
       })
     }
 
@@ -86,7 +101,11 @@ export const initCommand = {
         p.log.success(`Private key: ${privateKey}`)
         p.outro("You're all set!")
       }
-      return out.done({ status: 'configured', method: 'auto' })
+      return out.done({
+        status: 'configured',
+        method: 'auto',
+        source: config.get('source') ?? 'foc-cli',
+      })
     }
 
     // Agent mode: require explicit options

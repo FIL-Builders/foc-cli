@@ -21,7 +21,6 @@ export const summaryCommand = {
     totalLockup: z.string(),
     rateBasedLockup: z.string(),
     monthlyAccountRate: z.string(),
-    monthlyStorageRate: z.string(),
     funds: z.string(),
   }),
   async run(c: any) {
@@ -44,9 +43,6 @@ export const summaryCommand = {
           value: summary.totalRateBasedLockup,
         }),
         monthlyAccountRate: formatBalance({
-          value: summary.lockupRatePerMonth,
-        }),
-        monthlyStorageRate: formatBalance({
           value: summary.lockupRatePerMonth,
         }),
         funds: formatBalance({ value: summary.funds }),

@@ -15,6 +15,14 @@ export const listCommand = {
       .number()
       .default(314159)
       .describe('Chain ID. 314159 = Calibration, 314 = Mainnet'),
+    offset: z.coerce
+      .number()
+      .default(0)
+      .describe('Piece offset to start from (for pagination)'),
+    limit: z.coerce
+      .number()
+      .default(100)
+      .describe('Max pieces per page (defaults to 100)'),
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
@@ -29,6 +37,8 @@ export const listCommand = {
         metadata: z.record(z.string(), z.string()),
       })
     ),
+    hasMore: z.boolean(),
+    nextOffset: z.number().optional(),
   }),
   examples: [
     { args: { dataSetId: 42 }, description: 'List pieces in dataset #42' },
@@ -45,10 +55,15 @@ export const listCommand = {
       if (!dataSet)
         return out.fail('NOT_FOUND', `Dataset ${c.args.dataSetId} not found`)
 
+      const offset = c.options.offset ?? 0
+      const limit = c.options.limit ?? 100
+
       out.step('Fetching pieces')
-      const { pieces } = await getPiecesWithMetadata(client, {
+      const { pieces, hasMore } = await getPiecesWithMetadata(client, {
         dataSet,
         address: client.account.address,
+        offset: BigInt(offset),
+        limit: BigInt(limit),
       })
 
       const piecesList = pieces.map((piece: any) => {
@@ -61,15 +76,30 @@ export const listCommand = {
         }
       })
 
+      const nextOffset = offset + piecesList.length
+      const nextPage = hasMore
+        ? [
+            {
+              command: 'piece list',
+              args: { dataSetId: c.args.dataSetId },
+              options: { offset: nextOffset, limit },
+              description: `Show the next page of pieces (offset ${nextOffset})`,
+            },
+          ]
+        : []
+
       return out.done(
         {
           dataSetId: c.args.dataSetId.toString(),
           datasetScannerUrl: datasetScannerUrl(c.args.dataSetId, chain),
           pieces: piecesList,
+          hasMore,
+          ...(hasMore ? { nextOffset } : {}),
         },
         {
           cta: {
             commands: [
+              ...nextPage,
               {
                 command: 'piece remove',
                 args: { dataSetId: c.args.dataSetId },

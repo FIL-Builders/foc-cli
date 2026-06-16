@@ -37,11 +37,23 @@ describe('deepSerialize', () => {
 })
 
 describe('OutputContext', () => {
+  // Mirror incur's run-context: error() reads code/message/retryable/cta off
+  // the top level and rebuilds the { error } envelope (it does NOT echo the
+  // argument verbatim, and has no slot for processLog).
   function mockContext(agent: boolean) {
     return {
       agent,
       ok: (data: any, opts?: any) => (opts ? { ...data, ...opts } : data),
-      error: (err: any) => err,
+      error: (opts: any) => ({
+        error: {
+          code: opts.code,
+          message: opts.message,
+          ...(opts.retryable !== undefined
+            ? { retryable: opts.retryable }
+            : {}),
+        },
+        ...(opts.cta ? { cta: opts.cta } : {}),
+      }),
     }
   }
 
@@ -77,7 +89,7 @@ describe('OutputContext', () => {
       expect(result.cta.commands[0].command).toBe('wallet balance')
     })
 
-    test('fail returns error with processLog trail', () => {
+    test('fail returns an error envelope incur can render (code, message, cta)', () => {
       const c = mockContext(true)
       const out = new OutputContext(c)
       out.step('Connecting')
@@ -87,16 +99,11 @@ describe('OutputContext', () => {
           commands: [{ command: 'wallet fund', description: 'Get tokens' }],
         },
       })
+      // code/message must survive to the top-level error object so incur
+      // renders them instead of `code: null, message: null`.
       expect(result.error.code).toBe('TX_FAILED')
-      expect(result.processLog[0]).toEqual({
-        step: 'Connecting',
-        status: 'done',
-      })
-      expect(result.processLog[1]).toEqual({
-        step: 'Submitting',
-        status: 'failed',
-        error: 'insufficient funds',
-      })
+      expect(result.error.message).toBe('insufficient funds')
+      expect(result.cta.commands[0].command).toBe('wallet fund')
     })
 
     test('fail with retryable flag', () => {

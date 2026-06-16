@@ -1,7 +1,7 @@
-import { parseUnits, Synapse } from '@filoz/synapse-sdk'
+import { parseUnits } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { privateKeyClient } from '../../client.ts'
 import { OutputContext } from '../../output.ts'
+import { synapseClient } from '../../synapse.ts'
 import { hashLink, txExplorerUrl } from '../../utils.ts'
 
 export const depositCommand = {
@@ -32,8 +32,7 @@ export const depositCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
-    const { client, chain } = privateKeyClient(c.options.chain)
-    const synapse = new Synapse({ client, source: 'foc-cli' })
+    const { chain, synapse } = synapseClient(c.options.chain)
 
     try {
       out.step('Depositing funds')

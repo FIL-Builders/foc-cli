@@ -6,10 +6,13 @@ import {
   calculate,
   cid,
   claimTokens,
+  configStore,
   createDataSet,
   createDataSetAndAddPieces,
   fakeProvider,
   fakeWalletClient,
+  fetchMock,
+  fetchProviderSelectionInput,
   findPiece,
   formatBalance,
   getAccountSummary,
@@ -67,6 +70,8 @@ const { listCommand: pieceListCommand } = await import(
 const { removeCommand: pieceRemoveCommand } = await import(
   '../src/commands/piece/remove.ts'
 )
+const { selectHealthyProviders } = await import('../src/provider-selection.ts')
+const { synapseClient } = await import('../src/synapse.ts')
 
 const tempDirs: string[] = []
 
@@ -87,8 +92,19 @@ function commandContext({
     ok(data: any) {
       return data
     },
-    error(data: any) {
-      return data
+    // Mirror incur's run-context error(): reads code/message/retryable/cta off
+    // the top level and rebuilds the { error } envelope (not a verbatim echo).
+    error(opts: any) {
+      return {
+        error: {
+          code: opts.code,
+          message: opts.message,
+          ...(opts.retryable !== undefined
+            ? { retryable: opts.retryable }
+            : {}),
+        },
+        ...(opts.cta ? { cta: opts.cta } : {}),
+      }
     },
   }
 }
@@ -166,8 +182,11 @@ describe('top-level upload commands', () => {
     expect(synapseConstructorArgs).toEqual([
       { client: fakeWalletClient, source: 'foc-cli' },
     ])
+    expect(fetchProviderSelectionInput).toHaveBeenCalledWith(fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+    })
     expect(synapseStorage.createContexts).toHaveBeenCalledWith({
-      copies: 2,
+      providerIds: [77n, 79n],
       withCDN: true,
     })
     expect(synapseStorage.prepare).toHaveBeenCalledWith({
@@ -476,6 +495,7 @@ describe('wallet commands', () => {
       newPerMonthRate: 'formatted:111',
       depositNeeded: 'formatted:222',
       alreadyCovered: true,
+      needsFwssMaxApproval: false,
       processLog: [{ step: 'Getting costs', status: 'done' }],
     })
   })
@@ -511,7 +531,6 @@ describe('wallet commands', () => {
       totalLockup: 'formatted:2',
       rateBasedLockup: 'formatted:3',
       monthlyAccountRate: 'formatted:4',
-      monthlyStorageRate: 'formatted:4',
       funds: 'formatted:5',
     })
   })
@@ -568,7 +587,10 @@ describe('dataset commands', () => {
       serviceURL: 'https://provider.example',
       cdn: true,
     })
-    expect(waitForCreateDataSet).toHaveBeenCalledWith({ txHash: '0xcreate' })
+    expect(waitForCreateDataSet).toHaveBeenCalledWith({
+      txHash: '0xcreate',
+      statusUrl: 'https://provider.example/status',
+    })
     expect(result).toMatchObject({
       dataSetId: '42',
       scannerUrl: 'https://pdp.vxb.ai/calibration/dataset/42',
@@ -670,6 +692,8 @@ describe('dataset commands', () => {
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
       dataSet: expect.anything(),
       address: fakeWalletClient.account.address,
+      offset: 0n,
+      limit: 100n,
     })
     expect(result.dataset).toMatchObject({
       dataSetId: '42',
@@ -692,6 +716,7 @@ describe('dataset commands', () => {
         metadata: { name: 'file.txt' },
       },
     ])
+    expect(result.hasMore).toBe(false)
   })
 
   test('dataset terminate calls Synapse Core and maps the termination event', async () => {
@@ -720,6 +745,7 @@ describe('dataset commands', () => {
           metadata: {},
         },
       ],
+      hasMore: false,
     }))
 
     const result = await datasetDetailsCommand.run(
@@ -736,6 +762,38 @@ describe('dataset commands', () => {
       },
     ])
   })
+
+  test('dataset details paginates and emits a next-page CTA when more pieces remain', async () => {
+    getPiecesWithMetadata.mockImplementationOnce(async () => ({
+      pieces: [
+        {
+          id: 7n,
+          cid: cid('baga-page1'),
+          url: 'https://provider.example/piece/baga-page1',
+          metadata: { name: 'file.txt' },
+        },
+      ],
+      hasMore: true,
+    }))
+
+    const result = await datasetDetailsCommand.run(
+      commandContext({ options: { dataSetId: 42, offset: 5, limit: 1 } })
+    )
+
+    expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
+      dataSet: expect.anything(),
+      address: fakeWalletClient.account.address,
+      offset: 5n,
+      limit: 1n,
+    })
+    expect(result.hasMore).toBe(true)
+    expect(result.nextOffset).toBe(6)
+    expect(result.cta.commands).toContainEqual({
+      command: 'dataset details',
+      options: { dataSetId: 42, offset: 6, limit: 1 },
+      description: 'Show the next page of pieces (offset 6)',
+    })
+  })
 })
 
 describe('piece commands', () => {
@@ -750,6 +808,8 @@ describe('piece commands', () => {
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
       dataSet: expect.anything(),
       address: fakeWalletClient.account.address,
+      offset: 0n,
+      limit: 100n,
     })
     expect(result).toMatchObject({
       dataSetId: '42',
@@ -762,6 +822,43 @@ describe('piece commands', () => {
           metadata: { name: 'file.txt' },
         },
       ],
+    })
+    expect(result.hasMore).toBe(false)
+  })
+
+  test('piece list paginates and emits a next-page CTA when more pieces remain', async () => {
+    getPiecesWithMetadata.mockImplementationOnce(async () => ({
+      pieces: [
+        {
+          id: 7n,
+          cid: cid('baga-page1'),
+          url: 'https://provider.example/piece/baga-page1',
+          metadata: { name: 'file.txt' },
+        },
+      ],
+      hasMore: true,
+    }))
+
+    const result = await pieceListCommand.run(
+      commandContext({
+        args: { dataSetId: 42 },
+        options: { offset: 5, limit: 1 },
+      })
+    )
+
+    expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
+      dataSet: expect.anything(),
+      address: fakeWalletClient.account.address,
+      offset: 5n,
+      limit: 1n,
+    })
+    expect(result.hasMore).toBe(true)
+    expect(result.nextOffset).toBe(6)
+    expect(result.cta.commands).toContainEqual({
+      command: 'piece list',
+      args: { dataSetId: 42 },
+      options: { offset: 6, limit: 1 },
+      description: 'Show the next page of pieces (offset 6)',
     })
   })
 
@@ -793,5 +890,97 @@ describe('piece commands', () => {
     )
 
     expect(result.dataSetId).toBe('42')
+  })
+})
+
+describe('provider health selection', () => {
+  test('selects reachable endorsed providers first, primary first', async () => {
+    const selection = await selectHealthyProviders(fakeWalletClient, 2)
+
+    expect(fetchProviderSelectionInput).toHaveBeenCalledWith(fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+    })
+    expect(selection.providerIds).toEqual([77n, 79n])
+    expect(selection.usedUnendorsedPrimary).toBe(false)
+    expect(selection.reducedCopies).toBe(false)
+    expect(selection.reachableCount).toBe(3)
+  })
+
+  test('falls back to a reachable non-endorsed provider for the primary when no endorsed is reachable', async () => {
+    fetchProviderSelectionInput.mockImplementation(async () => ({
+      providers: [
+        {
+          id: 77n,
+          name: 'Endorsed',
+          pdp: { serviceURL: 'https://endorsed.example' },
+        },
+        {
+          id: 81n,
+          name: 'Approved',
+          pdp: { serviceURL: 'https://approved.example' },
+        },
+      ],
+      endorsedIds: [77n],
+      clientDataSets: [],
+    }))
+    // The only endorsed provider is down; the approved one answers.
+    fetchMock.mockImplementation(async (url: string | URL) =>
+      String(url).includes('endorsed.example')
+        ? new Response(null, { status: 503 })
+        : new Response(null, { status: 200 })
+    )
+
+    const selection = await selectHealthyProviders(fakeWalletClient, 1)
+
+    expect(selection.providerIds).toEqual([81n])
+    expect(selection.usedUnendorsedPrimary).toBe(true)
+    expect(selection.primaryName).toBe('Approved')
+    expect(selection.reducedCopies).toBe(false)
+  })
+
+  test('reduces copies when fewer providers are reachable than requested', async () => {
+    // Only provider 77 (https://provider.example) answers.
+    fetchMock.mockImplementation(async (url: string | URL) =>
+      String(url).includes('://provider.example')
+        ? new Response(null, { status: 200 })
+        : new Response(null, { status: 503 })
+    )
+
+    const selection = await selectHealthyProviders(fakeWalletClient, 3)
+
+    expect(selection.providerIds).toEqual([77n])
+    expect(selection.selectedCopies).toBe(1)
+    expect(selection.requestedCopies).toBe(3)
+    expect(selection.reducedCopies).toBe(true)
+    expect(selection.reachableCount).toBe(1)
+  })
+
+  test('throws a clear error when no provider is reachable', async () => {
+    fetchMock.mockImplementation(
+      async () => new Response(null, { status: 503 })
+    )
+
+    await expect(selectHealthyProviders(fakeWalletClient, 2)).rejects.toThrow(
+      /No reachable storage providers/
+    )
+  })
+})
+
+describe('synapse client construction', () => {
+  test('reports the configured source, defaulting to foc-cli', () => {
+    synapseClient(314159)
+    expect(synapseConstructorArgs.at(-1)).toEqual({
+      client: fakeWalletClient,
+      source: 'foc-cli',
+    })
+
+    configStore.get.mockImplementation((key: string) =>
+      key === 'source' ? 'my-app' : undefined
+    )
+    synapseClient(314159)
+    expect(synapseConstructorArgs.at(-1)).toEqual({
+      client: fakeWalletClient,
+      source: 'my-app',
+    })
   })
 })
