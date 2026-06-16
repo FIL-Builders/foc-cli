@@ -30,7 +30,9 @@ FOC turns Filecoin into a **programmable cloud** with four layers:
 npx foc-cli wallet init --auto   # generate wallet (or --keystore <path>, --privateKey <key>)
 ```
 
-Config: `~/Library/Preferences/foc-cli/config.json` (macOS). Keys: `privateKey`, `keystore`.
+Config: `~/Library/Preferences/foc-cli/config.json` (macOS). Keys: `privateKey`, `keystore`, `source`.
+
+**Source tag:** `source` is the tag the CLI reports to Synapse/Warm Storage (telemetry & attribution). Set it with `wallet init --source <name>` (persisted in config); defaults to `foc-cli`.
 
 ## Self-Documenting
 

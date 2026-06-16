@@ -121,6 +121,14 @@ npx foc-cli docs --url <url>                      # Fetch specific page
 | `--format <fmt>` | `toon` | Output format: `toon`, `json`, `yaml`, `md` |
 | `--json` | | Shorthand for `--format json` |
 
+### Source tag
+
+The `source` string the CLI reports to Synapse/Warm Storage (telemetry & attribution) is stored in your config. Set it to identify your app or integration (defaults to `foc-cli`):
+
+```bash
+npx foc-cli wallet init --source my-app
+```
+
 ## How FOC Works
 
 FOC transforms Filecoin into a **programmable cloud storage layer**:

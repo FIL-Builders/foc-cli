@@ -6,6 +6,7 @@ import {
   calculate,
   cid,
   claimTokens,
+  configStore,
   createDataSet,
   createDataSetAndAddPieces,
   fakeProvider,
@@ -72,6 +73,7 @@ const { removeCommand: pieceRemoveCommand } = await import(
 const { selectHealthyProviders } = await import(
   '../src/provider-selection.ts'
 )
+const { synapseClient } = await import('../src/synapse.ts')
 
 const tempDirs: string[] = []
 
@@ -963,5 +965,24 @@ describe('provider health selection', () => {
     await expect(selectHealthyProviders(fakeWalletClient, 2)).rejects.toThrow(
       /No reachable storage providers/
     )
+  })
+})
+
+describe('synapse client construction', () => {
+  test('reports the configured source, defaulting to foc-cli', () => {
+    synapseClient(314159)
+    expect(synapseConstructorArgs.at(-1)).toEqual({
+      client: fakeWalletClient,
+      source: 'foc-cli',
+    })
+
+    configStore.get.mockImplementation((key: string) =>
+      key === 'source' ? 'my-app' : undefined
+    )
+    synapseClient(314159)
+    expect(synapseConstructorArgs.at(-1)).toEqual({
+      client: fakeWalletClient,
+      source: 'my-app',
+    })
   })
 })
