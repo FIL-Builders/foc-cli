@@ -12,8 +12,9 @@ import { wallet } from './commands/wallet/index.ts'
 
 const cli = Cli.create('foc-cli', {
   version: packageJson.version,
-  description:
-    'CLI for Filecoin Onchain Cloud — decentralized storage on Filecoin with PDP verification and USDFC payments.',
+  // Single source of truth: npm, the CLI banner, and --llms all tell the
+  // same story.
+  description: packageJson.description,
   sync: {
     include: ['_root'],
     suggestions: [
