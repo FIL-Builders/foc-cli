@@ -3,6 +3,7 @@ import { Cli } from 'incur'
 import packageJson from '../package.json' with { type: 'json' }
 import { dataset } from './commands/dataset/index.ts'
 import { docsCommand } from './commands/docs.ts'
+import { downloadCommand } from './commands/download.ts'
 import { multiUploadCommand } from './commands/multi-upload.ts'
 import { piece } from './commands/piece/index.ts'
 import { provider } from './commands/provider/index.ts'
@@ -33,6 +34,7 @@ cli.command(provider)
 // Top-level multi-upload (most common operation)
 cli.command('multi-upload', multiUploadCommand)
 cli.command('upload', uploadCommand)
+cli.command('download', downloadCommand)
 cli.command('docs', docsCommand)
 
 cli.serve()
