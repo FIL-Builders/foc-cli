@@ -5,7 +5,7 @@ import { Readable } from 'node:stream'
 import type { StorageContext } from '@filoz/synapse-sdk/storage'
 import { z } from 'incur'
 import type { Hex } from 'viem'
-import { OutputContext } from '../output.ts'
+import { commandOutput, OutputContext } from '../output.ts'
 import { selectHealthyProviders } from '../provider-selection.ts'
 import { synapseClient } from '../synapse.ts'
 import {
@@ -27,7 +27,13 @@ type CopyResult = {
 
 export const multiUploadCommand = {
   description:
-    'Upload multiple readable files to Filecoin warm storage (high-level, recommended)',
+    'Upload multiple readable files to Filecoin warm storage (high-level, recommended). Commits USDFC from the payment account via an onchain transaction; defaults to Calibration testnet.',
+  mcp: {
+    annotations: {
+      title: 'Upload multiple files to Filecoin (spends USDFC)',
+      destructiveHint: false,
+    },
+  },
   args: z.object({
     paths: z
       .preprocess(
@@ -50,7 +56,7 @@ export const multiUploadCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     status: z.string(),
     results: z.array(
       z.object({

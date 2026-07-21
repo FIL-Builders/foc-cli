@@ -1,11 +1,17 @@
 import { parseUnits } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { OutputContext } from '../../output.ts'
+import { commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 import { hashLink, txExplorerUrl } from '../../utils.ts'
 
 export const depositCommand = {
   description: 'Deposit USDFC into payment account (uses permit approvals)',
+  mcp: {
+    annotations: {
+      title: 'Deposit USDFC (moves funds)',
+      destructiveHint: false,
+    },
+  },
   args: z.object({
     amount: z.string().describe('Amount of USDFC to deposit'),
   }),
@@ -17,7 +23,7 @@ export const depositCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     status: z.string(),
     txHash: z.string(),
     txExplorerUrl: z.string(),

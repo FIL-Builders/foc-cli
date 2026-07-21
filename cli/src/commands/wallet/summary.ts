@@ -3,10 +3,13 @@ import { formatBalance } from '@filoz/synapse-core/utils'
 import { z } from 'incur'
 import { maxUint256 } from 'viem'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { commandOutput, OutputContext } from '../../output.ts'
 
 export const summaryCommand = {
   description: 'Get payment account summary with funding timeline',
+  mcp: {
+    annotations: { title: 'Payment account summary', readOnlyHint: true },
+  },
   options: z.object({
     chain: z
       .number()
@@ -15,7 +18,7 @@ export const summaryCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     availableFunds: z.string(),
     timeRemaining: z.string(),
     totalLockup: z.string(),

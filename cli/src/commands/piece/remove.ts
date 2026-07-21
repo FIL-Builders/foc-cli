@@ -3,11 +3,18 @@ import { getPdpDataSet } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { waitForTransactionReceipt } from 'viem/actions'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
 export const removeCommand = {
-  description: 'Remove a piece from a dataset',
+  description:
+    'Remove a piece from a dataset. Schedules onchain deletion — the provider stops proving (and eventually drops) the piece.',
+  mcp: {
+    annotations: {
+      title: 'Remove piece (deletes data)',
+      destructiveHint: true,
+    },
+  },
   args: z.object({
     dataSetId: z.coerce.number().describe('Dataset ID'),
     pieceId: z.coerce.number().describe('Piece ID to remove'),
@@ -20,7 +27,7 @@ export const removeCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     status: z.string(),
     dataSetId: z.string(),
     datasetScannerUrl: z.string(),

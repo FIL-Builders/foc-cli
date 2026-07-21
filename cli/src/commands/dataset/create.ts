@@ -2,11 +2,18 @@ import * as sp from '@filoz/synapse-core/sp'
 import { getPDPProvider } from '@filoz/synapse-core/sp-registry'
 import { z } from 'incur'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
 export const createCommand = {
-  description: 'Create a new PDP dataset with a storage provider',
+  description:
+    'Create a new PDP dataset with a storage provider. Starts a paid storage rail: an onchain transaction that commits ongoing USDFC charges.',
+  mcp: {
+    annotations: {
+      title: 'Create dataset (starts paid rail)',
+      destructiveHint: false,
+    },
+  },
   args: z.object({
     providerId: z.coerce
       .number()
@@ -21,7 +28,7 @@ export const createCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     dataSetId: z.string(),
     scannerUrl: z.string(),
     providerId: z.string(),

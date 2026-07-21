@@ -4,14 +4,20 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import type { FailedAttempt } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { OutputContext } from '../output.ts'
+import { commandOutput, OutputContext } from '../output.ts'
 import { selectHealthyProviders } from '../provider-selection.ts'
 import { synapseClient } from '../synapse.ts'
 import { datasetScannerUrl, hashLink, pieceScannerUrl } from '../utils.ts'
 
 export const uploadCommand = {
   description:
-    'Upload a file to Filecoin warm storage (high-level, recommended)',
+    'Upload a file to Filecoin warm storage (high-level, recommended). Commits USDFC from the payment account via an onchain transaction; defaults to Calibration testnet.',
+  mcp: {
+    annotations: {
+      title: 'Upload file to Filecoin (spends USDFC)',
+      destructiveHint: false,
+    },
+  },
   args: z.object({
     path: z.string().describe('File path to upload'),
   }),
@@ -29,7 +35,7 @@ export const uploadCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     status: z.string(),
     result: z.object({
       pieceCid: z.string(),
