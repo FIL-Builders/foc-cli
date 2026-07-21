@@ -1,172 +1,101 @@
+<h1 align="center">foc-cli</h1>
+
 <p align="center">
-  <strong>foc-cli</strong>
-  <br/>
   Store files on Filecoin. From your terminal. Or your AI agent.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/foc-cli"><img src="https://img.shields.io/npm/v/foc-cli?color=0090ff&label=npm" alt="npm version"/></a>
+  <a href="https://www.npmjs.com/package/foc-cli"><img src="https://img.shields.io/node/v/foc-cli?color=339933&label=node" alt="node version"/></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue" alt="license"/></a>
 </p>
 
 <p align="center">
   <a href="https://docs.filecoin.cloud">Docs</a> &nbsp;&bull;&nbsp;
   <a href="https://skills.sh">Skills.sh</a> &nbsp;&bull;&nbsp;
+  <a href="https://clawhub.ai">ClawHub</a> &nbsp;&bull;&nbsp;
   <a href="https://github.com/FIL-Builders/foc-cli">GitHub</a>
 </p>
 
 ---
 
-**foc-cli** is a CLI and AI agent skill for [Filecoin Onchain Cloud](https://docs.filecoin.cloud) (FOC) — decentralized warm storage with cryptographic proof your data is held, paid with USDFC stablecoin on Filecoin.
-
-**Why FOC?** Traditional cloud storage requires trusting a provider. FOC gives you onchain verification (PDP proofs), programmable payments, and redundant copies across independent storage providers — all through a simple CLI or AI agent skill.
-
-## Install
-
-**As a CLI:**
-
-```bash
-npm install -g foc-cli
-```
-
-**As an AI Agent Skill** via [skills.sh](https://skills.sh) — works with Claude Code, Cursor, Copilot, Codex, Windsurf, and 20+ AI tools:
-
-```bash
-# Install all skills (CLI + docs)
-npx skills add FIL-Builders/foc-cli
-
-# Or install individually
-npx skills add FIL-Builders/foc-cli --skill foc-cli  # CLI & operations
-npx skills add FIL-Builders/foc-cli --skill foc-docs   # Documentation search
-```
-
-**As an MCP server** for direct tool access:
-
-```bash
-npx foc-cli mcp add                       # Auto-detect your agent
-npx foc-cli mcp add --agent claude-code   # Specific agent
-```
+**foc-cli** is a command-line interface and AI agent skill for [Filecoin Onchain Cloud](https://docs.filecoin.cloud) (FOC) — decentralized warm storage on Filecoin with cryptographic proof your data is held (PDP), paid in USDFC stablecoin. Upload, download (with built-in cryptographic verification), and pay for storage from a terminal, a script, or an agent via MCP.
 
 ## Quick Start
 
 ```bash
 npx foc-cli wallet init --auto        # 1. Create a wallet
 npx foc-cli wallet fund               # 2. Get testnet tokens
-npx foc-cli wallet deposit 1          # 3. Deposit 1 USDFC for storage
-npx foc-cli upload ./myfile.pdf       # 4. Upload a file
+npx foc-cli wallet costs --extraBytes 1000000 --extraRunway 1   # 3. Estimate cost
+npx foc-cli wallet deposit 1          # 4. Deposit 1 USDFC for storage
+npx foc-cli upload ./myfile.pdf       # 5. Upload a file
+npx foc-cli download <pieceCid>       # 6. Prove it's retrievable (pieceCid from upload output)
 ```
 
-That's it. Your file is now stored on Filecoin with PDP verification and redundant copies.
+A successful `download` is cryptographic proof your file is stored and intact — the SDK validates the bytes against the piece CID.
 
-## Skills
+## Install
 
-This package ships two focused skills for AI agents:
-
-| Skill | Purpose | When to use |
-|-------|---------|-------------|
-| **foc-cli** | CLI & Operations | Setup, upload, wallets, datasets, pieces, providers — everything operational. |
-| **foc-docs** | Documentation | Search guides, SDK refs, concept explainers. |
+```bash
+npm install -g foc-cli                    # CLI
+npx skills add FIL-Builders/foc-cli       # Agent skills via skills.sh (Claude Code, Cursor, Copilot, 20+ tools)
+clawhub install foc-cli && clawhub install foc-docs   # Agent skills via ClawHub (OpenClaw)
+npx foc-cli mcp add                       # MCP server (auto-detects your agent)
+```
 
 ## Commands
 
-Every command supports `-h` for full usage details.
+Every command supports `-h` for usage and `--schema --format json` for its JSON Schema. Flags are camelCase as documented (`--withCDN`); help shows kebab-case equivalents — both work. Boolean flags are presence-only switches (use `--flag=false` for an explicit value).
 
-### Upload
+| Group | Commands | Notes |
+|-------|----------|-------|
+| Upload | `upload <path>` · `multi-upload <a,b>` | Auto provider/dataset. `--copies N`, `--withCDN` |
+| Download | `download <pieceCid> [--out <path>]` | Bytes validated against the CID — retrieval is the verification |
+| Wallet | `wallet init` · `balance` · `fund` · `deposit` · `withdraw` · `summary` · `costs` | `fund` = testnet faucet. `costs` = live pricing (source of truth) |
+| Datasets | `dataset list` · `details` · `create` · `terminate` | `details` paginates pieces with next-page + fetch-all CTAs |
+| Pieces | `piece list <id>` · `piece remove <id> <pieceId>` | Paginated with next-page + fetch-all CTAs |
+| Providers | `provider list` | Approved PDP providers with location, pricing, performance |
+| Docs | `docs --prompt "upload"` · `docs --url developer-guides/synapse.md` | Searches/fetches `docs.filecoin.cloud` only |
 
-```bash
-npx foc-cli upload <path>                        # Upload with auto provider/dataset
-npx foc-cli upload <path> --withCDN --copies 3   # CDN + 3 redundant copies
-npx foc-cli multi-upload ./a.pdf,./b.pdf         # Batch upload; all paths must be readable
-```
+**Global options:** `--chain <id>` (`314159` testnet default, `314` mainnet) · `--format toon|json|yaml|md` · `--json` · `--debug`
 
-### Wallet
+## Wallet & Keys
 
-```bash
-npx foc-cli wallet init [--auto|--keystore <path>|--privateKey <key>]
-npx foc-cli wallet balance             # Check FIL & USDFC balances
-npx foc-cli wallet fund                # Testnet faucet
-npx foc-cli wallet deposit <amount>    # Deposit USDFC for storage
-npx foc-cli wallet withdraw <amount>   # Withdraw USDFC
-npx foc-cli wallet summary             # Funding timeline & rates
-npx foc-cli wallet costs --extraBytes <n> --extraRunway <months>
-```
+`wallet init --auto` for quick start, testnet, and automation. Use an encrypted [Foundry keystore](skills/foc-cli/references/keystore-setup.md) (`--keystore <path>`) when the wallet will hold real funds. A `--privateKey` flag exists for non-interactive setups — avoid it: raw keys in arguments leak into shell history and logs. Keep a dedicated wallet holding only what foc-cli needs.
 
-### Datasets
+## Chains & Funding
 
-```bash
-npx foc-cli dataset list                          # List all datasets
-npx foc-cli dataset details -d <id>               # Metadata + pieces
-npx foc-cli dataset create <providerId> [--cdn]   # Create dataset
-npx foc-cli dataset upload <path> <providerId>    # Create + upload
-npx foc-cli dataset terminate <dataSetId>         # Terminate dataset
-```
+All commands default to **Calibration testnet**; add `--chain 314` for mainnet. Testnet tokens are one command (`wallet fund`). Mainnet needs real FIL for gas and USDFC for storage — see the [funding guide](skills/foc-cli/references/mainnet-funding.md).
 
-### Pieces & Providers
+**Pricing:** billed per copy per month by size (default 2 copies) plus a flat per-data-set monthly fee. `wallet costs` is the source of truth.
 
-```bash
-npx foc-cli piece list <dataSetId>                # List pieces in dataset
-npx foc-cli piece remove <dataSetId> <pieceId>    # Remove piece
-npx foc-cli provider list                         # Approved PDP providers
-```
+## Agent Skills
 
-### Docs
+| Skill | Purpose |
+|-------|---------|
+| [**foc-cli**](skills/foc-cli/SKILL.md) | Operations — setup, upload, download, wallets, datasets, pieces, providers |
+| [**foc-docs**](skills/foc-docs/SKILL.md) | Documentation — search guides, SDK refs, concept explainers |
 
-```bash
-npx foc-cli docs                                  # Browse docs index
-npx foc-cli docs --prompt "upload files"          # Search by topic
-npx foc-cli docs --url <url>                      # Fetch specific page
-```
+Built with [incur](https://github.com/wevm/incur) for first-class agent support:
 
-### Global Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--chain <id>` / `-c` | `314159` | Chain ID (`314159` = testnet, `314` = mainnet) |
-| `--debug` | `false` | Verbose error logging |
-| `--format <fmt>` | `toon` | Output format: `toon`, `json`, `yaml`, `md` |
-| `--json` | | Shorthand for `--format json` |
-
-### Source tag
-
-The `source` string the CLI reports to Synapse/Warm Storage (telemetry & attribution) is stored in your config. Set it to identify your app or integration (defaults to `foc-cli`):
-
-```bash
-npx foc-cli wallet init --source my-app
-```
+- **MCP server** — every command as an MCP tool (`npx foc-cli --mcp`)
+- **Structured output** — `--json`, `--format yaml`, `--filter-output`
+- **Introspection** — `--schema` per command, `--llms` manifest
+- **TTY-aware** — interactive prompts for humans, structured output for agents
+- **Source tag** — `wallet init --source my-app` sets the attribution tag reported to Synapse (default `foc-cli`)
 
 ## How FOC Works
-
-FOC transforms Filecoin into a **programmable cloud storage layer**:
 
 | Layer | What it does |
 |-------|-------------|
 | **Storage** | Warm, retrievable files via FWSS (Filecoin Warm Storage Service) |
-| **Verification** | PDP (Proof of Data Possession) — cryptographic proof providers hold your data |
+| **Verification** | PDP — cryptographic proof providers hold your data |
 | **Settlement** | Filecoin Pay — continuous USDFC payment streams to providers |
-| **Developer** | Synapse SDK + this CLI — TypeScript APIs for storage, payments, retrieval |
-
-**Pricing:** $2.5/TiB/month per copy (minimum 2 copies). Minimum spend: 0.06 USDFC/month (~24 GiB).
-
-## Agent Features
-
-Built with [incur](https://github.com/wevm/incur) for first-class AI agent support:
-
-- **MCP Server** — all commands as MCP tools (`npx foc-cli --mcp`)
-- **Structured Output** — `--json`, `--format yaml`, `--token-count`
-- **Schema Introspection** — `npx foc-cli <cmd> --schema` for JSON Schema
-- **LLM Manifest** — `npx foc-cli --llms` for machine-readable docs
-- **TTY Awareness** — interactive prompts for humans, structured output for agents
-
-## Mainnet
-
-All commands default to **Calibration testnet**. Add `--chain 314` for mainnet:
-
-```bash
-npx foc-cli upload ./data.bin --chain 314
-```
+| **Developer** | Synapse SDK + this CLI |
 
 ## References
 
-- [FOC Documentation](https://docs.filecoin.cloud)
-- [LLM-friendly docs](https://docs.filecoin.cloud/llms.txt)
-- [Synapse SDK](https://github.com/FilOzone/synapse-sdk)
-- [PDP Overview](https://docs.filecoin.cloud/core-concepts/pdp-overview/)
-- [Filecoin Pay](https://docs.filecoin.cloud/core-concepts/filecoin-pay-overview/)
+[FOC Documentation](https://docs.filecoin.cloud) · [LLM-friendly docs](https://docs.filecoin.cloud/llms.txt) · [Synapse SDK](https://github.com/FilOzone/synapse-sdk) · [PDP Overview](https://docs.filecoin.cloud/core-concepts/pdp-overview/) · [Filecoin Pay](https://docs.filecoin.cloud/core-concepts/filecoin-pay-overview/)
 
 ## License
 
