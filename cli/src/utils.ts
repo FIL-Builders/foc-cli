@@ -1,5 +1,19 @@
+import { homedir } from 'node:os'
+import { resolve } from 'node:path'
 import type { Chain } from '@filoz/synapse-core/chains'
 import terminalLink from 'terminal-link'
+
+/**
+ * Expand a leading `~` to the home directory. Shells do this for interactive
+ * users, but paths arriving via MCP tool calls or config files reach us
+ * unexpanded — without this, `~/.foundry/keystores/foc` silently "does not
+ * exist" in agent contexts.
+ */
+export function expandHome(path: string): string {
+  if (path === '~') return homedir()
+  if (path.startsWith('~/')) return resolve(homedir(), path.slice(2))
+  return path
+}
 
 function networkSlug(chain: Chain): string {
   return chain.id === 314 ? 'mainnet' : 'calibration'

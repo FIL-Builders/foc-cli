@@ -1,13 +1,58 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import * as p from '@clack/prompts'
 import { z } from 'incur'
 import { generatePrivateKey } from 'viem/accounts'
 import config from '../../config.ts'
 import { OutputContext } from '../../output.ts'
-import { isAgent } from '../../utils.ts'
+import { expandHome, isAgent } from '../../utils.ts'
+
+/**
+ * Init is the only moment a bad keystore path is cheap to catch — once it's
+ * in config, the mistake surfaces at first use as an opaque decrypt failure.
+ * Validate shape only, not the password: a decrypt test would need the
+ * password prompt here, and cast owns that interaction at use time.
+ */
+function validateKeystoreFile(
+  path: string
+): { code: string; message: string } | null {
+  if (!existsSync(path)) {
+    return {
+      code: 'KEYSTORE_NOT_FOUND',
+      message: `Keystore file not found: ${path}`,
+    }
+  }
+  if (statSync(path).isDirectory()) {
+    return {
+      code: 'KEYSTORE_INVALID',
+      message: `${path} is a directory, not a keystore file. cast wallet new/import writes a file named by a random UUID inside that directory — pass the file's full path.`,
+    }
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'))
+    if (!parsed || typeof parsed !== 'object' || !('crypto' in parsed)) {
+      return {
+        code: 'KEYSTORE_INVALID',
+        message: `${path} is not an encrypted keystore (expected JSON with a "crypto" field). Create one with cast wallet new or cast wallet import — see the keystore-setup guide.`,
+      }
+    }
+  } catch {
+    return {
+      code: 'KEYSTORE_INVALID',
+      message: `${path} is not an encrypted keystore (could not parse it as JSON). Create one with cast wallet new or cast wallet import — see the keystore-setup guide.`,
+    }
+  }
+  return null
+}
 
 export const initCommand = {
-  description: 'Initialize wallet with a private key or keystore',
+  description:
+    'Initialize wallet with a private key or keystore. Replaces any previously configured wallet. Keystore mode prompts for its password on the terminal at use time, so it only works in interactive CLI sessions — for MCP or automation, configure a private key (--auto or --privateKey).',
+  mcp: {
+    annotations: {
+      title: 'Configure wallet (replaces existing config)',
+      destructiveHint: true,
+    },
+  },
   options: z.object({
     auto: z.boolean().optional().describe('Generate a new random private key'),
     keystore: z
@@ -48,21 +93,20 @@ export const initCommand = {
     }
 
     if (c.options.keystore) {
-      if (existsSync(c.options.keystore)) {
-        out.step('Configuring keystore')
-        config.set('keystore', c.options.keystore)
-        config.delete('privateKey')
-        if (!agent) p.outro("You're all set!")
-        return out.done({
-          status: 'configured',
-          method: 'keystore',
-          path: c.options.keystore,
-        })
-      }
-      return out.fail(
-        'KEYSTORE_NOT_FOUND',
-        `Keystore file not found: ${c.options.keystore}`
-      )
+      // Expand ~ ourselves: MCP/agent invocations have no shell to do it, so
+      // '~/.foundry/keystores/foc' would otherwise "not exist".
+      const keystorePath = expandHome(c.options.keystore)
+      const problem = validateKeystoreFile(keystorePath)
+      if (problem) return out.fail(problem.code, problem.message)
+      out.step('Configuring keystore')
+      config.set('keystore', keystorePath)
+      config.delete('privateKey')
+      if (!agent) p.outro("You're all set!")
+      return out.done({
+        status: 'configured',
+        method: 'keystore',
+        path: keystorePath,
+      })
     }
 
     if (c.options.privateKey) {
