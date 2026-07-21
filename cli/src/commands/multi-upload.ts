@@ -1,5 +1,7 @@
-import { readFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { access, constants, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import type { StorageContext } from '@filoz/synapse-sdk/storage'
 import { z } from 'incur'
 import type { Hex } from 'viem'
@@ -92,14 +94,20 @@ export const multiUploadCommand = {
     const { client, chain, synapse } = synapseClient(c.options.chain)
 
     try {
-      out.step('Reading files')
+      out.step('Checking files')
       const absolutePaths = c.args.paths.map((filePath: string) =>
         path.resolve(filePath)
       )
-      const fileResultsSettled = await Promise.allSettled(
-        absolutePaths.map((filePath: string) => readFile(filePath))
+      // All-or-nothing gate without buffering: verify readability and collect
+      // sizes (for prepare) up front, then stream each file at store time —
+      // peak memory stays flat instead of holding the whole batch.
+      const fileStatsSettled = await Promise.allSettled(
+        absolutePaths.map(async (filePath: string) => {
+          await access(filePath, constants.R_OK)
+          return (await stat(filePath)).size
+        })
       )
-      const fileReadRejected = fileResultsSettled
+      const fileReadRejected = fileStatsSettled
         .map((result, index) => ({ result, path: absolutePaths[index] }))
         .filter(({ result }) => result.status === 'rejected')
 
@@ -118,19 +126,9 @@ export const multiUploadCommand = {
         )
       }
 
-      const fileResults = fileResultsSettled
+      const fileSizes = fileStatsSettled
         .filter((result) => result.status === 'fulfilled')
         .map((result) => result.value)
-
-      const fileStreams = fileResults.map(
-        (fileResult) =>
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue(fileResult)
-              controller.close()
-            },
-          })
-      )
 
       out.step('Checking provider health')
       const selection = await selectHealthyProviders(
@@ -157,7 +155,7 @@ export const multiUploadCommand = {
       out.step('Preparing upload')
       const prep = await synapse.storage.prepare({
         context: contexts,
-        dataSize: BigInt(fileResults.reduce((acc, f) => acc + f.byteLength, 0)),
+        dataSize: BigInt(fileSizes.reduce((acc, size) => acc + size, 0)),
       })
 
       if (prep.transaction) {
@@ -171,7 +169,9 @@ export const multiUploadCommand = {
       const secondary = contexts.slice(1)
 
       const primaryStoreResultsSettled = await Promise.allSettled(
-        fileStreams.map((fileStream) => primary.store(fileStream))
+        absolutePaths.map((filePath: string) =>
+          primary.store(Readable.toWeb(createReadStream(filePath)))
+        )
       )
       const primaryStoreResults = primaryStoreResultsSettled
         .filter((r) => r.status === 'fulfilled')

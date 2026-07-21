@@ -1,5 +1,7 @@
-import { readFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import type { FailedAttempt } from '@filoz/synapse-sdk'
 import { z } from 'incur'
 import { OutputContext } from '../output.ts'
@@ -78,15 +80,13 @@ export const uploadCommand = {
     const { client, chain, synapse } = synapseClient(c.options.chain)
 
     try {
-      out.step('Reading file')
+      out.step('Opening file')
+      // Stream the file straight through Synapse to the primary provider —
+      // never buffer the whole piece in memory. Only the size is needed up
+      // front (for prepare), which stat provides without reading a byte.
       const absolutePath = path.resolve(c.args.path)
-      const file = await readFile(absolutePath)
-      const fileStream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(file)
-          controller.close()
-        },
-      })
+      const { size } = await stat(absolutePath)
+      const fileStream = Readable.toWeb(createReadStream(absolutePath))
 
       out.step('Checking provider health')
       const selection = await selectHealthyProviders(
@@ -113,7 +113,7 @@ export const uploadCommand = {
       out.step('Preparing upload')
       const prep = await synapse.storage.prepare({
         context: contexts,
-        dataSize: BigInt(file.byteLength),
+        dataSize: BigInt(size),
       })
 
       if (prep.transaction) {
