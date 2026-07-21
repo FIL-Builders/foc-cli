@@ -1,19 +1,16 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
-  calculate,
   cid,
   claimTokens,
   configStore,
   createDataSet,
-  createDataSetAndAddPieces,
   fakeProvider,
   fakeWalletClient,
   fetchMock,
   fetchProviderSelectionInput,
-  findPiece,
   formatBalance,
   getAccountSummary,
   getApprovedPDPProviders,
@@ -32,15 +29,16 @@ import {
   synapseStorage,
   synapseWaitForTransactionReceipt,
   terminateServiceSync,
-  uploadPiece,
   waitForCreateDataSet,
-  waitForCreateDataSetAddPieces,
   waitForTransactionReceipt,
 } from './command-mocks.ts'
 
 const { uploadCommand } = await import('../src/commands/upload.ts')
 const { multiUploadCommand } = await import('../src/commands/multi-upload.ts')
+const { downloadCommand } = await import('../src/commands/download.ts')
+const { docsCommand } = await import('../src/commands/docs.ts')
 const { balanceCommand } = await import('../src/commands/wallet/balance.ts')
+const { initCommand } = await import('../src/commands/wallet/init.ts')
 const { costsCommand } = await import('../src/commands/wallet/costs.ts')
 const { depositCommand } = await import('../src/commands/wallet/deposit.ts')
 const { fundCommand } = await import('../src/commands/wallet/fund.ts')
@@ -60,9 +58,6 @@ const { listCommand: datasetListCommand } = await import(
 )
 const { terminateCommand: datasetTerminateCommand } = await import(
   '../src/commands/dataset/terminate.ts'
-)
-const { uploadCommand: datasetUploadCommand } = await import(
-  '../src/commands/dataset/upload.ts'
 )
 const { listCommand: pieceListCommand } = await import(
   '../src/commands/piece/list.ts'
@@ -440,6 +435,75 @@ describe('wallet commands', () => {
     })
   })
 
+  test('wallet balance on a brand-new address humanizes the actor-not-found dump', async () => {
+    synapsePayments.walletBalance.mockImplementationOnce(async () => {
+      throw new Error(
+        'The contract function "balanceOf" reverted.\n\nmulticall3... actor not found (RetCode=1)'
+      )
+    })
+
+    const result = await balanceCommand.run(commandContext())
+
+    expect(result.error.code).toBe('ADDRESS_NOT_ON_CHAIN')
+    expect(result.error.message).toContain('no onchain history')
+    expect(result.error.message).toContain(fakeWalletClient.account.address)
+    expect(result.cta.commands[0]).toMatchObject({ command: 'wallet fund' })
+  })
+
+  test('wallet init --keystore rejects a directory instead of configuring it', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'foc-cli-test-'))
+    tempDirs.push(dir)
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: dir } })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INVALID')
+    expect(result.error.message).toContain('directory')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keystore',
+      expect.anything()
+    )
+  })
+
+  test('wallet init --keystore rejects a file that is not an encrypted keystore', async () => {
+    const filePath = await tempFile('not-a-keystore.json', '{"hello":"world"}')
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: filePath } })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INVALID')
+    expect(result.error.message).toContain('crypto')
+  })
+
+  test('wallet init --keystore reports a missing path as KEYSTORE_NOT_FOUND', async () => {
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: '/nonexistent-dir-8f2k/ks.json' } })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_NOT_FOUND')
+  })
+
+  test('wallet init --keystore accepts a keystore-shaped file and clears any raw key', async () => {
+    const filePath = await tempFile(
+      'keystore.json',
+      JSON.stringify({ crypto: { cipher: 'aes-128-ctr' }, id: 'x', version: 3 })
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: filePath } })
+    )
+
+    expect(configStore.set).toHaveBeenCalledWith('keystore', filePath)
+    expect(configStore.delete).toHaveBeenCalledWith('privateKey')
+    expect(result).toMatchObject({
+      status: 'configured',
+      method: 'keystore',
+      path: filePath,
+    })
+  })
+
   test('wallet deposit parses the amount, deposits with permit, and waits for the transaction', async () => {
     const result = await depositCommand.run(
       commandContext({ args: { amount: '5' } })
@@ -479,15 +543,47 @@ describe('wallet commands', () => {
   })
 
   test('wallet costs prepares storage for the requested bytes and runway', async () => {
+    const activeDataSet = {
+      dataSetId: 42n,
+      providerId: 77n,
+      live: true,
+      managed: true,
+      pdpEndEpoch: 0n,
+    }
+    // Same provider as activeDataSet — still costed as its own context
+    const sameProviderDataSet = { ...activeDataSet, dataSetId: 43n }
+    const terminatingDataSet = {
+      ...activeDataSet,
+      dataSetId: 44n,
+      providerId: 78n,
+      pdpEndEpoch: 999n,
+    }
+    getPdpDataSets.mockResolvedValueOnce([
+      activeDataSet,
+      sameProviderDataSet,
+      terminatingDataSet,
+    ] as any)
+
     const result = await costsCommand.run(
       commandContext({
         options: { extraBytes: 1024, extraRunway: 2 },
       })
     )
 
+    expect(getPdpDataSets).toHaveBeenCalledWith(fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+    })
+    expect(synapseStorage.createContext).toHaveBeenCalledTimes(2)
+    expect(synapseStorage.createContext).toHaveBeenCalledWith({
+      dataSetId: 42n,
+    })
+    expect(synapseStorage.createContext).toHaveBeenCalledWith({
+      dataSetId: 43n,
+    })
     expect(synapseStorage.prepare).toHaveBeenCalledWith({
       dataSize: 1024n,
       extraRunwayEpochs: 172800n,
+      context: [{ dataSetId: 42n }, { dataSetId: 43n }],
     })
     expect(formatBalance).toHaveBeenNthCalledWith(1, { value: 111n })
     expect(formatBalance).toHaveBeenNthCalledWith(2, { value: 222n })
@@ -498,6 +594,24 @@ describe('wallet commands', () => {
       needsFwssMaxApproval: false,
       processLog: [{ step: 'Getting costs', status: 'done' }],
     })
+  })
+
+  test('wallet costs falls back to default provider selection with no active datasets', async () => {
+    getPdpDataSets.mockResolvedValueOnce([] as any)
+
+    const result = await costsCommand.run(
+      commandContext({
+        options: { extraBytes: 1024, extraRunway: 1 },
+      })
+    )
+
+    expect(synapseStorage.createContexts).not.toHaveBeenCalled()
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: undefined,
+    })
+    expect(result).toMatchObject({ alreadyCovered: true })
   })
 
   test('wallet fund claims faucet tokens, waits for FIL, and returns updated balances', async () => {
@@ -608,53 +722,6 @@ describe('dataset commands', () => {
     })
     expect(getPDPProvider).not.toHaveBeenCalled()
     expect(createDataSet).not.toHaveBeenCalled()
-  })
-
-  test('dataset upload calculates the piece, uploads to the provider, and creates the dataset with metadata', async () => {
-    const filePath = await tempFile('dataset-file.txt', 'piece')
-
-    const result = await datasetUploadCommand.run(
-      commandContext({
-        args: { path: filePath, providerId: 77 },
-        options: { cdn: false },
-      })
-    )
-
-    expect(calculate).toHaveBeenCalled()
-    const uploadedPieceCid = uploadPiece.mock.calls[0]?.[0]?.pieceCid
-    expect(uploadedPieceCid?.toString()).toBe('baga-calculated')
-    expect(uploadedPieceCid).not.toHaveProperty('then')
-    expect(uploadPiece).toHaveBeenCalledWith({
-      data: expect.any(Buffer),
-      serviceURL: 'https://provider.example',
-      pieceCid: uploadedPieceCid,
-    })
-    expect(findPiece).toHaveBeenCalledWith({
-      pieceCid: uploadedPieceCid,
-      serviceURL: 'https://provider.example',
-      poll: true,
-    })
-    expect(createDataSetAndAddPieces).toHaveBeenCalledWith(fakeWalletClient, {
-      serviceURL: 'https://provider.example',
-      payee: fakeProvider.payee,
-      cdn: false,
-      pieces: [
-        {
-          pieceCid: uploadedPieceCid,
-          metadata: { name: 'dataset-file.txt' },
-        },
-      ],
-    })
-    expect(waitForCreateDataSetAddPieces).toHaveBeenCalledWith({
-      statusUrl: 'https://provider.example/status',
-    })
-    expect(result).toMatchObject({
-      pieceCid: 'baga-calculated',
-      pieceScannerUrl: 'https://pdp.vxb.ai/calibration/piece/baga-calculated',
-      dataSetId: '43',
-      datasetScannerUrl: 'https://pdp.vxb.ai/calibration/dataset/43',
-      pieceIds: ['8'],
-    })
   })
 
   test('dataset list maps datasets and current block number', async () => {
@@ -793,6 +860,11 @@ describe('dataset commands', () => {
       options: { dataSetId: 42, offset: 6, limit: 1 },
       description: 'Show the next page of pieces (offset 6)',
     })
+    expect(result.cta.commands).toContainEqual({
+      command: 'dataset details',
+      options: { dataSetId: 42, offset: 0, limit: 2 },
+      description: 'Fetch all 2 pieces in one call',
+    })
   })
 })
 
@@ -859,6 +931,12 @@ describe('piece commands', () => {
       args: { dataSetId: 42 },
       options: { offset: 6, limit: 1 },
       description: 'Show the next page of pieces (offset 6)',
+    })
+    expect(result.cta.commands).toContainEqual({
+      command: 'piece list',
+      args: { dataSetId: 42 },
+      options: { offset: 0, limit: 2 },
+      description: 'Fetch all 2 pieces in one call',
     })
   })
 
@@ -982,5 +1060,428 @@ describe('synapse client construction', () => {
       client: fakeWalletClient,
       source: 'my-app',
     })
+  })
+})
+
+describe('download command', () => {
+  test('download retrieves validated bytes and writes them to the output path', async () => {
+    const outPath = await tempFile('downloaded.bin', '')
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: outPath },
+      })
+    )
+
+    expect(synapseStorage.download).toHaveBeenCalledWith({
+      pieceCid: 'baga-piece',
+    })
+    expect(result).toMatchObject({
+      pieceCid: 'baga-piece',
+      pieceScannerUrl: 'https://pdp.vxb.ai/calibration/piece/baga-piece',
+      size: 4,
+      verified: true,
+      path: outPath,
+    })
+    const written = await readFile(outPath)
+    expect([...written]).toEqual([1, 2, 3, 4])
+  })
+
+  test('download passes withCDN and providerAddress through to the SDK', async () => {
+    const outPath = await tempFile('cdn.bin', '')
+    await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: outPath, withCDN: true, providerAddress: '0xprovider' },
+      })
+    )
+
+    expect(synapseStorage.download).toHaveBeenCalledWith({
+      pieceCid: 'baga-piece',
+      withCDN: true,
+      providerAddress: '0xprovider',
+    })
+  })
+
+  test('download reports a retryable failure when retrieval fails', async () => {
+    synapseStorage.download.mockImplementationOnce(async () => {
+      throw new Error('All provider retrieval attempts failed')
+    })
+    const result = await downloadCommand.run(
+      commandContext({ args: { pieceCid: 'baga-piece' } })
+    )
+
+    expect(result.error).toMatchObject({
+      code: 'DOWNLOAD_FAILED',
+      retryable: true,
+    })
+  })
+
+  test('download reports an invalid piece CID as non-retryable', async () => {
+    synapseStorage.download.mockImplementationOnce(async () => {
+      throw new Error('Invalid PieceCID: nope')
+    })
+    const result = await downloadCommand.run(
+      commandContext({ args: { pieceCid: 'nope' } })
+    )
+
+    expect(result.error.code).toBe('INVALID_PIECE_CID')
+    expect(result.error.retryable).toBeUndefined()
+  })
+})
+
+describe('docs command url restriction', () => {
+  test('docs --url resolves a bare docs path against docs.filecoin.cloud', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Page\n\ncontent', { status: 200 })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse.md' } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/developer-guides/synapse.md',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/developer-guides/synapse.md'
+    )
+    expect(result.content).toContain('# Page')
+  })
+
+  test('docs --url upgrades http docs URLs to https and strips nothing else', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Start', { status: 200 })
+    )
+    await docsCommand.run(
+      commandContext({
+        options: { url: 'http://docs.filecoin.cloud/getting-started.md' },
+      })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/getting-started.md',
+      expect.anything()
+    )
+  })
+
+  test('docs --url rejects non-docs hosts without fetching', async () => {
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'https://evil.example.com/page.md' } })
+    )
+
+    expect(result.error.code).toBe('INVALID_DOCS_URL')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test('docs --url rejects path traversal in bare paths', async () => {
+    const result = await docsCommand.run(
+      commandContext({ options: { url: '../../etc/passwd' } })
+    )
+
+    expect(result.error.code).toBe('INVALID_DOCS_URL')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('docs command markdown normalization', () => {
+  test('docs --url rewrites extensionless paths to their .md mirror', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Synapse', { status: 200 })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse' } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/developer-guides/synapse.md',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/developer-guides/synapse.md'
+    )
+  })
+
+  test('docs --url rewrites trailing-slash site URLs to their .md mirror', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# TOC', { status: 200 })
+    )
+    await docsCommand.run(
+      commandContext({
+        options: {
+          url: 'https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc/',
+        },
+      })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc.md',
+      expect.anything()
+    )
+  })
+
+  test('docs --url refuses to return HTML when no markdown mirror exists', async () => {
+    fetchMock.mockImplementationOnce(
+      async () =>
+        new Response('<!DOCTYPE html><html><body>sidebar soup</body></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'llms.txt' } })
+    )
+
+    expect(result.error.code).toBe('HTML_RESPONSE')
+    expect(result.error.message).toContain('markdown')
+  })
+})
+
+describe('docs command deep sitemap search', () => {
+  const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset><url><loc>https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc/</loc></url>
+<url><loc>https://docs.filecoin.cloud/developer-guides/payments/payment-operations/</loc></url>
+<url><loc>https://docs.filecoin.cloud/changelog-sdk/v1-1-0/</loc></url></urlset>`
+
+  test('docs --deep searches the sitemap and auto-fetches the top .md mirror', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response('- [Payments](https://docs.filecoin.cloud/x.md): pay', {
+            status: 200,
+          })
+      ) // llms.txt index
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-index.xml → fall back to single shard
+      .mockImplementationOnce(
+        async () => new Response(SITEMAP_XML, { status: 200 })
+      ) // sitemap-0.xml
+      .mockImplementationOnce(
+        async () => new Response('# getPdpDataSet', { status: 200 })
+      ) // auto-fetched page
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'getPdpDataSet', deep: true } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/sitemap-0.xml',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc.md'
+    )
+    expect(result.content).toContain('getPdpDataSet')
+    expect(result.matchedEntries).toHaveLength(1)
+  })
+
+  test('docs falls back to the sitemap when the curated index has no matches', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response('- [Payments](https://docs.filecoin.cloud/x.md): pay', {
+            status: 200,
+          })
+      ) // llms.txt — no match for the prompt
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-index.xml → fall back to single shard
+      .mockImplementationOnce(
+        async () => new Response(SITEMAP_XML, { status: 200 })
+      ) // sitemap-0.xml fallback
+      .mockImplementationOnce(
+        async () => new Response('# getPdpDataSet', { status: 200 })
+      ) // auto-fetched page
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'getpdpdataset' } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/sitemap-0.xml',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc.md'
+    )
+  })
+})
+
+describe('docs command attribution', () => {
+  test('docs requests identify foc-cli via User-Agent with version and source tag', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Page', { status: 200 })
+    )
+    await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse.md' } })
+    )
+
+    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit]
+    const userAgent = (init.headers as Record<string, string>)['user-agent']
+    expect(userAgent).toMatch(/^foc-cli\/\d+\.\d+\.\d+ /)
+    expect(userAgent).toContain('source=foc-cli')
+    expect(userAgent).toContain('github.com/FIL-Builders/foc-cli')
+  })
+
+  test('docs User-Agent carries a custom source tag from config', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'source' ? 'my-app' : undefined
+    )
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Page', { status: 200 })
+    )
+    await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse.md' } })
+    )
+
+    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit]
+    expect((init.headers as Record<string, string>)['user-agent']).toContain(
+      'source=my-app'
+    )
+  })
+})
+
+describe('download error taxonomy', () => {
+  test('CID-mismatch integrity failures are NOT retryable and get a distinct code', async () => {
+    synapseStorage.download.mockImplementationOnce(async () => {
+      throw new Error(
+        'Failed to download piece.\n\nDetails: PieceCID verification failed. Expected: baga-a, Got: baga-b'
+      )
+    })
+    const result = await downloadCommand.run(
+      commandContext({ args: { pieceCid: 'baga-piece' } })
+    )
+
+    expect(result.error.code).toBe('INTEGRITY_MISMATCH')
+    expect(result.error.retryable).toBeUndefined()
+    expect(result.cta.commands[0]).toMatchObject({ command: 'download' })
+  })
+
+  test('unknown --providerAddress is a non-retryable PROVIDER_NOT_FOUND', async () => {
+    synapseStorage.download.mockImplementationOnce(async () => {
+      throw new Error('Provider 0xdead not found')
+    })
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { providerAddress: '0xdead' },
+      })
+    )
+
+    expect(result.error.code).toBe('PROVIDER_NOT_FOUND')
+    expect(result.error.retryable).toBeUndefined()
+  })
+
+  test('local write failures after a validated download are WRITE_FAILED, not retryable retrieval errors', async () => {
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: '/nonexistent-dir-fjq38/x.bin' },
+      })
+    )
+
+    expect(result.error.code).toBe('WRITE_FAILED')
+    expect(result.error.retryable).toBeUndefined()
+    expect(result.error.message).toContain('Downloaded and validated 4 bytes')
+  })
+
+  test('download without --out writes to ./<pieceCid> in the cwd', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'foc-cli-test-'))
+    tempDirs.push(dir)
+    const prevCwd = process.cwd()
+    process.chdir(dir)
+    try {
+      const result = await downloadCommand.run(
+        commandContext({ args: { pieceCid: 'baga-piece' } })
+      )
+      // process.cwd() rather than dir: macOS tmpdir is a /var -> /private/var
+      // symlink and cwd reports the realpath.
+      expect(result.path).toBe(path.join(process.cwd(), 'baga-piece'))
+      const written = await readFile(result.path)
+      expect([...written]).toEqual([1, 2, 3, 4])
+    } finally {
+      process.chdir(prevCwd)
+    }
+  })
+})
+
+describe('docs command hardening round 2', () => {
+  test('deep search walks sitemap-index.xml shards when available', async () => {
+    const INDEX_XML = `<sitemapindex><sitemap><loc>https://docs.filecoin.cloud/sitemap-0.xml</loc></sitemap></sitemapindex>`
+    const SHARD_XML = `<urlset><url><loc>https://docs.filecoin.cloud/reference/foo/getpdpdataset/toc/</loc></url></urlset>`
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response('- [X](https://docs.filecoin.cloud/x.md): x', {
+            status: 200,
+          })
+      ) // llms.txt
+      .mockImplementationOnce(
+        async () => new Response(INDEX_XML, { status: 200 })
+      ) // sitemap-index.xml
+      .mockImplementationOnce(
+        async () => new Response(SHARD_XML, { status: 200 })
+      ) // shard
+      .mockImplementationOnce(
+        async () => new Response('# page', { status: 200 })
+      ) // auto-fetch
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'getpdpdataset', deep: true } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/sitemap-index.xml',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/reference/foo/getpdpdataset/toc.md'
+    )
+  })
+
+  test('auto-fallback fails loudly when the sitemap cannot be fetched instead of reporting no matches', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response('- [X](https://docs.filecoin.cloud/x.md): x', {
+            status: 200,
+          })
+      ) // llms.txt — no match
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-index
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-0
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'getpdpdataset' } })
+    )
+
+    expect(result.error.code).toBe('FETCH_FAILED')
+    expect(result.error.retryable).toBe(true)
+  })
+
+  test('docs --url refuses to follow redirects (3xx surfaces as FETCH_FAILED)', async () => {
+    fetchMock.mockImplementationOnce(
+      async () =>
+        new Response(null, {
+          status: 301,
+          headers: { location: 'https://evil.example.com/x' },
+        })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse.md' } })
+    )
+
+    expect(result.error.code).toBe('FETCH_FAILED')
+  })
+
+  test('HTML body-sniff fires even without an html content-type', async () => {
+    fetchMock.mockImplementationOnce(
+      async () =>
+        new Response('<div>rendered page soup</div>', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'llms.txt' } })
+    )
+
+    expect(result.error.code).toBe('HTML_RESPONSE')
   })
 })

@@ -45,6 +45,9 @@ export const synapsePayments = {
 }
 
 export const synapseStorage = {
+  createContext: mock(async (options: any) => ({
+    dataSetId: options?.dataSetId,
+  })),
   createContexts: mock(async () => []),
   prepare: mock(async () => ({
     transaction: null,
@@ -66,6 +69,7 @@ export const synapseStorage = {
     copies: [],
     failedAttempts: [],
   })),
+  download: mock(async () => new Uint8Array([1, 2, 3, 4])),
 }
 
 export const synapseConstructorArgs: any[] = []
@@ -205,6 +209,10 @@ export const waitForCreateDataSet = mock(async () => ({
 }))
 
 export const uploadPiece = mock(async () => undefined)
+export const uploadPieceStreaming = mock(async () => ({
+  pieceCid: cid('baga-calculated'),
+  size: 5,
+}))
 export const findPiece = mock(async () => undefined)
 export const calculate = mock(async () => cid('baga-calculated'))
 
@@ -305,6 +313,7 @@ mock.module('@filoz/synapse-core/sp', () => ({
   findPiece,
   schedulePieceDeletion,
   uploadPiece,
+  uploadPieceStreaming,
   waitForCreateDataSet,
   waitForCreateDataSetAddPieces,
 }))
@@ -363,6 +372,9 @@ export function resetCommandMocks() {
     status: 'success',
   }))
 
+  synapseStorage.createContext.mockImplementation(async (options: any) => ({
+    dataSetId: options?.dataSetId,
+  }))
   synapseStorage.createContexts.mockImplementation(async () => [])
   synapseStorage.prepare.mockImplementation(async () => ({
     transaction: null,
@@ -382,6 +394,9 @@ export function resetCommandMocks() {
     copies: [],
     failedAttempts: [],
   }))
+  synapseStorage.download.mockImplementation(
+    async () => new Uint8Array([1, 2, 3, 4])
+  )
   parseUnits.mockImplementation((value: string) => BigInt(value) * 1_000_000n)
 
   getPDPProvider.mockImplementation(async () => fakeProvider)
@@ -405,6 +420,10 @@ export function resetCommandMocks() {
     dataSetId: 42n,
   }))
   uploadPiece.mockImplementation(async () => undefined)
+  uploadPieceStreaming.mockImplementation(async () => ({
+    pieceCid: cid('baga-calculated'),
+    size: 5,
+  }))
   findPiece.mockImplementation(async () => undefined)
   calculate.mockImplementation(async () => cid('baga-calculated'))
   createDataSetAndAddPieces.mockImplementation(async () => ({
