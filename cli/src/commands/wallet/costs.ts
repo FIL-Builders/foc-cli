@@ -6,7 +6,7 @@ import { synapseClient } from '../../synapse.ts'
 
 export const costsCommand = {
   description:
-    'Estimate storage costs before uploading: live per-month rate, required deposit, and whether an operator approval is still needed. Read-only — spends nothing.',
+    'Estimate storage costs before uploading: live per-month rate, required deposit, and whether an operator approval is still needed. Prices the number of copies the next upload will create (default 2, like upload). Read-only — spends nothing.',
   mcp: {
     annotations: { title: 'Estimate storage costs', readOnlyHint: true },
   },
@@ -17,6 +17,17 @@ export const costsCommand = {
       .describe('Chain ID. 314159 = Calibration, 314 = Mainnet'),
     extraBytes: z.number().describe('Extra bytes to upload in bytes'),
     extraRunway: z.number().describe('Extra runway in months'),
+    copies: z
+      .number()
+      .default(2)
+      .optional()
+      .describe(
+        'Copies the upload will create — the estimate prices this many storage contexts (match the --copies you will pass to upload)'
+      ),
+    withCDN: z
+      .boolean()
+      .optional()
+      .describe('Price CDN-enabled storage for any new datasets'),
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
@@ -43,28 +54,37 @@ export const costsCommand = {
     try {
       out.step('Getting costs')
 
-      // Cost estimation only needs the user's existing datasets — build
-      // contexts from them explicitly so prepare() never falls back to
-      // smart provider selection (which requires a live endorsed provider).
+      const copies = c.options.copies ?? 2
       const dataSets = await getPdpDataSets(client, {
         address: client.account.address,
       })
       // Active, non-terminating datasets only. Contexts are created one at a
       // time via createContext — the plural createContexts rejects datasets
-      // sharing a provider, but every dataset has its own rail and lockup, so
-      // each must be costed individually.
+      // sharing a provider.
       const dataSetIds = dataSets
         .filter((ds) => ds.live && ds.managed && ds.pdpEndEpoch === 0n)
         .map((ds) => ds.dataSetId)
 
-      const context =
-        dataSetIds.length > 0
-          ? await Promise.all(
-              dataSetIds.map((dataSetId) =>
-                synapse.storage.createContext({ dataSetId })
-              )
-            )
-          : undefined
+      // Price what the next upload will actually pay for: prepare() applies
+      // dataSize once per supplied context, so the estimate must contain
+      // exactly `copies` contexts — pricing every active dataset made the
+      // quote scale with historical dataset count instead. Reuse existing
+      // datasets first (their current size shifts the effective rate and they
+      // carry no creation fee), then pad with new-dataset placeholders.
+      const reused = await Promise.all(
+        dataSetIds
+          .slice(0, copies)
+          .map((dataSetId) => synapse.storage.createContext({ dataSetId }))
+      )
+      // prepare() reads only dataSetId/withCDN off each context when costing;
+      // a placeholder without a dataSetId is priced as a new dataset (creation
+      // fee included) and never touches endorsed-provider selection — which
+      // also keeps the empty-wallet case fully offline.
+      const placeholders = Array.from(
+        { length: Math.max(0, copies - reused.length) },
+        () => ({ dataSetId: undefined, withCDN: c.options.withCDN ?? false })
+      )
+      const context = [...reused, ...placeholders] as any
 
       const prep = await synapse.storage.prepare({
         dataSize: BigInt(c.options.extraBytes),

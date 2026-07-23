@@ -741,7 +741,7 @@ describe('wallet commands', () => {
     })
   })
 
-  test('wallet costs falls back to default provider selection with no active datasets', async () => {
+  test('wallet costs prices two new datasets for an empty wallet without provider selection', async () => {
     getPdpDataSets.mockResolvedValueOnce([] as any)
 
     const result = await costsCommand.run(
@@ -751,12 +751,82 @@ describe('wallet commands', () => {
     )
 
     expect(synapseStorage.createContexts).not.toHaveBeenCalled()
+    expect(synapseStorage.createContext).not.toHaveBeenCalled()
     expect(synapseStorage.prepare).toHaveBeenCalledWith({
       dataSize: 1024n,
       extraRunwayEpochs: 86400n,
-      context: undefined,
+      context: [
+        { dataSetId: undefined, withCDN: false },
+        { dataSetId: undefined, withCDN: false },
+      ],
     })
     expect(result).toMatchObject({ alreadyCovered: true })
+  })
+
+  // prepare() applies extraBytes once per supplied context, so the estimate
+  // must price the copies the next upload will write — not every dataset the
+  // wallet has ever created.
+  test('wallet costs with one active dataset prices the second copy as a new dataset', async () => {
+    getPdpDataSets.mockResolvedValueOnce([
+      {
+        dataSetId: 42n,
+        providerId: 77n,
+        live: true,
+        managed: true,
+        pdpEndEpoch: 0n,
+      },
+    ] as any)
+
+    await costsCommand.run(
+      commandContext({ options: { extraBytes: 1024, extraRunway: 1 } })
+    )
+
+    expect(synapseStorage.createContext).toHaveBeenCalledTimes(1)
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: [{ dataSetId: 42n }, { dataSetId: undefined, withCDN: false }],
+    })
+  })
+
+  test('wallet costs with three active datasets prices only the requested copies', async () => {
+    const base = { providerId: 77n, live: true, managed: true, pdpEndEpoch: 0n }
+    getPdpDataSets.mockResolvedValueOnce([
+      { ...base, dataSetId: 42n },
+      { ...base, dataSetId: 43n },
+      { ...base, dataSetId: 44n },
+    ] as any)
+
+    await costsCommand.run(
+      commandContext({ options: { extraBytes: 1024, extraRunway: 1 } })
+    )
+
+    expect(synapseStorage.createContext).toHaveBeenCalledTimes(2)
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: [{ dataSetId: 42n }, { dataSetId: 43n }],
+    })
+  })
+
+  test('wallet costs --copies overrides how many contexts are priced', async () => {
+    getPdpDataSets.mockResolvedValueOnce([] as any)
+
+    await costsCommand.run(
+      commandContext({
+        options: { extraBytes: 1024, extraRunway: 1, copies: 3, withCDN: true },
+      })
+    )
+
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: [
+        { dataSetId: undefined, withCDN: true },
+        { dataSetId: undefined, withCDN: true },
+        { dataSetId: undefined, withCDN: true },
+      ],
+    })
   })
 
   test('wallet fund claims faucet tokens, waits for FIL, and returns updated balances', async () => {
