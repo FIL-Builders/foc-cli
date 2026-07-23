@@ -1336,6 +1336,61 @@ describe('docs command deep sitemap search', () => {
   })
 })
 
+describe('docs command index url allowlist', () => {
+  // The curated index arrives over the network; a planted external link must
+  // be dropped at parse time, never auto-fetched.
+  test('docs auto-fetch never follows an external host planted in llms.txt', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response(
+            [
+              '- [Evil payments](https://evil.example.com/payments.md): payments',
+              '- [Payments](https://docs.filecoin.cloud/payments.md): payments',
+            ].join('\n'),
+            { status: 200 }
+          )
+      ) // llms.txt with a planted external entry
+      .mockImplementationOnce(
+        async () => new Response('# Payments', { status: 200 })
+      ) // auto-fetched page — must be the docs-host entry
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'payments' } })
+    )
+
+    expect(result.source).toBe('https://docs.filecoin.cloud/payments.md')
+    const fetchedUrls = fetchMock.mock.calls.map((call: any[]) => call[0])
+    expect(fetchedUrls).not.toContain('https://evil.example.com/payments.md')
+    expect(result.matchedEntries).toHaveLength(1)
+  })
+
+  test('sitemap entries off the docs host are dropped', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () => new Response('# nothing relevant', { status: 200 })
+      ) // llms.txt — no entries at all
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-index.xml → single-shard fallback
+      .mockImplementationOnce(
+        async () =>
+          new Response(
+            '<urlset><url><loc>https://evil.example.com/payments/</loc></url></urlset>',
+            { status: 200 }
+          )
+      ) // sitemap-0.xml with only an external loc
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'payments' } })
+    )
+
+    const fetchedUrls = fetchMock.mock.calls.map((call: any[]) => call[0])
+    expect(
+      fetchedUrls.some((url: string) => url.includes('evil.example.com'))
+    ).toBe(false)
+    expect(result.matchedEntries).toHaveLength(0)
+  })
+})
+
 describe('docs command attribution', () => {
   test('docs requests identify foc-cli via User-Agent with version and source tag', async () => {
     fetchMock.mockImplementationOnce(

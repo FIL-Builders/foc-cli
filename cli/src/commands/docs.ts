@@ -44,6 +44,26 @@ function resolveDocsUrl(input: string): string | null {
 }
 
 /**
+ * The same boundary as --url, applied to URLs that arrive INSIDE fetched
+ * content — llms.txt index entries and sitemap <loc> values. Without this,
+ * an external link planted in the curated index would be auto-fetched
+ * verbatim, bypassing the allowlist. HTTPS on the docs host or the entry
+ * is dropped at parse time, so no downstream path needs its own check.
+ */
+function validateDocsIndexUrl(raw: string): URL | null {
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return null
+  }
+  if (parsed.hostname !== DOCS_HOST) return null
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+  parsed.protocol = 'https:'
+  return parsed
+}
+
+/**
  * The docs site serves every page twice: rendered HTML at the pretty path
  * ("developer-guides/synapse/") and clean markdown at the same path with `.md`.
  * Fetching the HTML variant buries an agent in sidebar markup, so pretty paths
@@ -89,13 +109,8 @@ const MAX_DEEP_RESULTS = 20
 function parseSitemap(xml: string): DocEntry[] {
   const entries: DocEntry[] = []
   for (const match of xml.matchAll(/<loc>([^<]+)<\/loc>/g)) {
-    let parsed: URL
-    try {
-      parsed = new URL(match[1])
-    } catch {
-      continue
-    }
-    if (parsed.hostname !== DOCS_HOST) continue
+    const parsed = validateDocsIndexUrl(match[1])
+    if (!parsed) continue
     const segments = parsed.pathname.split('/').filter(Boolean)
     if (segments.length === 0) continue
     parsed.pathname = normalizeDocsPath(parsed.pathname)
@@ -142,13 +157,9 @@ async function fetchSitemapEntries(): Promise<DocEntry[] | null> {
     for (const match of (await indexResp.text()).matchAll(
       /<loc>([^<]+)<\/loc>/g
     )) {
-      try {
-        const parsed = new URL(match[1])
-        if (parsed.hostname === DOCS_HOST && parsed.pathname.endsWith('.xml')) {
-          shardUrls.push(parsed.toString())
-        }
-      } catch {
-        // skip malformed shard URLs
+      const parsed = validateDocsIndexUrl(match[1])
+      if (parsed?.pathname.endsWith('.xml')) {
+        shardUrls.push(parsed.toString())
       }
     }
     if (shardUrls.length > 0) {
@@ -199,9 +210,11 @@ function parseLlmsTxt(
     // Match markdown links: - [Title](url): Description
     const match = line.match(/^-\s*\[([^\]]+)\]\(([^)]+)\):?\s*(.*)/)
     if (match) {
+      const validated = validateDocsIndexUrl(match[2])
+      if (!validated) continue
       entries.push({
         title: match[1],
-        url: match[2],
+        url: validated.toString(),
         description: match[3] || match[1],
         section: currentSection,
       })
