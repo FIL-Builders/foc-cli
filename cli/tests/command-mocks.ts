@@ -45,6 +45,9 @@ export const synapsePayments = {
 }
 
 export const synapseStorage = {
+  createContext: mock(async (options: any) => ({
+    dataSetId: options?.dataSetId,
+  })),
   createContexts: mock(async () => []),
   prepare: mock(async () => ({
     transaction: null,
@@ -66,6 +69,7 @@ export const synapseStorage = {
     copies: [],
     failedAttempts: [],
   })),
+  download: mock(async () => new Uint8Array([1, 2, 3, 4])),
 }
 
 export const synapseConstructorArgs: any[] = []
@@ -205,6 +209,10 @@ export const waitForCreateDataSet = mock(async () => ({
 }))
 
 export const uploadPiece = mock(async () => undefined)
+export const uploadPieceStreaming = mock(async () => ({
+  pieceCid: cid('baga-calculated'),
+  size: 5,
+}))
 export const findPiece = mock(async () => undefined)
 export const calculate = mock(async () => cid('baga-calculated'))
 
@@ -261,6 +269,15 @@ export const configStore = {
 
 mock.module('../src/config.ts', () => ({ default: configStore }))
 
+// The real isAgent() ORs in !process.stdout.isTTY, which is always true under
+// the test runner — every command context would count as agent mode. Pin it
+// to the context flag so tests can exercise both modes deliberately.
+const realUtils = await import('../src/utils.ts')
+mock.module('../src/utils.ts', () => ({
+  ...realUtils,
+  isAgent: (c: { agent?: boolean }) => c.agent === true,
+}))
+
 mock.module('../src/client.ts', () => ({
   privateKeyClient,
   publicClient,
@@ -305,6 +322,7 @@ mock.module('@filoz/synapse-core/sp', () => ({
   findPiece,
   schedulePieceDeletion,
   uploadPiece,
+  uploadPieceStreaming,
   waitForCreateDataSet,
   waitForCreateDataSetAddPieces,
 }))
@@ -363,6 +381,9 @@ export function resetCommandMocks() {
     status: 'success',
   }))
 
+  synapseStorage.createContext.mockImplementation(async (options: any) => ({
+    dataSetId: options?.dataSetId,
+  }))
   synapseStorage.createContexts.mockImplementation(async () => [])
   synapseStorage.prepare.mockImplementation(async () => ({
     transaction: null,
@@ -376,12 +397,30 @@ export function resetCommandMocks() {
       needsFwssMaxApproval: false,
     },
   }))
-  synapseStorage.upload.mockImplementation(async () => ({
-    pieceCid: cid('baga-upload'),
-    size: 4,
-    copies: [],
-    failedAttempts: [],
-  }))
+  synapseStorage.upload.mockImplementation(async (_data: any, options: any) => {
+    // Mirror the pinned SDK's _resolveUploadContexts guard: contexts are
+    // exclusive with the options they were built from. Keeping the guard in
+    // the mock makes every upload test a regression against that contract.
+    if (options?.contexts != null) {
+      const invalid = ['providerIds', 'dataSetIds', 'withCDN'].filter(
+        (key) => options[key] !== undefined
+      )
+      if (invalid.length > 0) {
+        throw new Error(
+          `Cannot specify both 'contexts' and other options: ${invalid.join(', ')}`
+        )
+      }
+    }
+    return {
+      pieceCid: cid('baga-upload'),
+      size: 4,
+      copies: [],
+      failedAttempts: [],
+    }
+  })
+  synapseStorage.download.mockImplementation(
+    async () => new Uint8Array([1, 2, 3, 4])
+  )
   parseUnits.mockImplementation((value: string) => BigInt(value) * 1_000_000n)
 
   getPDPProvider.mockImplementation(async () => fakeProvider)
@@ -405,6 +444,10 @@ export function resetCommandMocks() {
     dataSetId: 42n,
   }))
   uploadPiece.mockImplementation(async () => undefined)
+  uploadPieceStreaming.mockImplementation(async () => ({
+    pieceCid: cid('baga-calculated'),
+    size: 5,
+  }))
   findPiece.mockImplementation(async () => undefined)
   calculate.mockImplementation(async () => cid('baga-calculated'))
   createDataSetAndAddPieces.mockImplementation(async () => ({

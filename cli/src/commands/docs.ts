@@ -1,14 +1,179 @@
 import { z } from 'incur'
-import { OutputContext } from '../output.ts'
+import packageJson from '../../package.json' with { type: 'json' }
+import config from '../config.ts'
+import { commandOutput, OutputContext } from '../output.ts'
 
-const LLMS_TXT_URL = 'https://docs.filecoin.cloud/llms.txt'
+const DOCS_HOST = 'docs.filecoin.cloud'
+const LLMS_TXT_URL = `https://${DOCS_HOST}/llms.txt`
 const MAX_HEADER_DEPTH = 4 // #### max — skip ##### and deeper
+
+/**
+ * `--url` is restricted to the official docs host so the command stays a
+ * docs fetcher rather than a general-purpose HTTP client. Accepts a full
+ * docs.filecoin.cloud URL or a bare docs path (e.g.
+ * "developer-guides/synapse.md"), resolved against the host. Returns null
+ * for anything else.
+ */
+function resolveDocsUrl(input: string): string | null {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(input)) {
+    let parsed: URL
+    try {
+      parsed = new URL(input)
+    } catch {
+      return null
+    }
+    if (parsed.hostname !== DOCS_HOST) return null
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+    parsed.protocol = 'https:'
+    parsed.pathname = normalizeDocsPath(parsed.pathname)
+    return parsed.toString()
+  }
+  // Belt-and-suspenders: the hardcoded origin already prevents cross-host
+  // escapes; this just rejects traversal-looking inputs (percent-decoded so
+  // %2e%2e doesn't slip through).
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(input)
+  } catch {
+    return null
+  }
+  if (decoded.includes('..')) return null
+  const parsed = new URL(`https://${DOCS_HOST}/${input.replace(/^\/+/, '')}`)
+  parsed.pathname = normalizeDocsPath(parsed.pathname)
+  return parsed.toString()
+}
+
+/**
+ * The same boundary as --url, applied to URLs that arrive INSIDE fetched
+ * content — llms.txt index entries and sitemap <loc> values. Without this,
+ * an external link planted in the curated index would be auto-fetched
+ * verbatim, bypassing the allowlist. HTTPS on the docs host or the entry
+ * is dropped at parse time, so no downstream path needs its own check.
+ */
+function validateDocsIndexUrl(raw: string): URL | null {
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return null
+  }
+  if (parsed.hostname !== DOCS_HOST) return null
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+  parsed.protocol = 'https:'
+  return parsed
+}
+
+/**
+ * The docs site serves every page twice: rendered HTML at the pretty path
+ * ("developer-guides/synapse/") and clean markdown at the same path with `.md`.
+ * Fetching the HTML variant buries an agent in sidebar markup, so pretty paths
+ * are rewritten to their markdown mirror.
+ */
+function normalizeDocsPath(pathname: string): string {
+  const trimmed = pathname.replace(/\/+$/, '')
+  if (trimmed === '') return pathname // site root has no .md mirror
+  const lastSegment = trimmed.slice(trimmed.lastIndexOf('/') + 1)
+  return lastSegment.includes('.') ? trimmed : `${trimmed}.md`
+}
+
+/**
+ * Backstop: never hand rendered HTML to the caller — it's kilobytes of
+ * sidebar markup with no doc content. Markdown mirrors never start with a
+ * tag, so a leading '<' (or an html content-type) means the page has no
+ * markdown mirror at this path.
+ */
+function isHtmlContent(resp: Response, body: string): boolean {
+  const contentType = resp.headers.get('content-type') ?? ''
+  return contentType.includes('text/html') || body.trimStart().startsWith('<')
+}
 
 interface DocEntry {
   title: string
   url: string
   description: string
   section: string
+}
+
+const SITEMAP_INDEX_URL = `https://${DOCS_HOST}/sitemap-index.xml`
+const SITEMAP_URL = `https://${DOCS_HOST}/sitemap-0.xml`
+// A broad term can match hundreds of the ~1,800 sitemap pages; cap what we
+// return so the entry list stays consumable.
+const MAX_DEEP_RESULTS = 20
+
+/**
+ * The curated llms.txt index is ~30 guide pages; the sitemap is the full site
+ * (~1,800 pages) including the complete SDK API reference and changelogs.
+ * Sitemap entries carry no descriptions, so titles/sections are derived from
+ * the URL path and every URL is rewritten to its markdown mirror.
+ */
+function parseSitemap(xml: string): DocEntry[] {
+  const entries: DocEntry[] = []
+  for (const match of xml.matchAll(/<loc>([^<]+)<\/loc>/g)) {
+    const parsed = validateDocsIndexUrl(match[1])
+    if (!parsed) continue
+    const segments = parsed.pathname.split('/').filter(Boolean)
+    if (segments.length === 0) continue
+    parsed.pathname = normalizeDocsPath(parsed.pathname)
+    const meaningful = segments.filter((s) => s !== 'toc' && s !== 'namespaces')
+    entries.push({
+      title: meaningful[meaningful.length - 1] ?? segments[0],
+      url: parsed.toString(),
+      description: segments.join(' / '),
+      section: segments[0],
+    })
+  }
+  return entries
+}
+
+/**
+ * All docs traffic identifies itself so the docs site's metrics can attribute
+ * CLI/agent usage in server logs and analytics without any site-side changes:
+ * a foc-cli User-Agent carrying the CLI version and the configured `source`
+ * tag (the same attribution tag reported to Synapse; set via
+ * `wallet init --source <name>`).
+ */
+function docsFetch(url: string): Promise<Response> {
+  const source = config.get('source') ?? 'foc-cli'
+  return fetch(url, {
+    // The host allowlist is checked before the request; refusing to follow
+    // redirects keeps it true END-TO-END — a 3xx surfaces as !resp.ok instead
+    // of silently fetching wherever the redirect points.
+    redirect: 'manual',
+    headers: {
+      'user-agent': `foc-cli/${packageJson.version} (+https://github.com/FIL-Builders/foc-cli; source=${source})`,
+    },
+  })
+}
+
+/**
+ * Walk sitemap-index.xml so extra shards are picked up automatically; fall
+ * back to the single known shard when the index is unavailable (today the
+ * live site has exactly one shard).
+ */
+async function fetchSitemapEntries(): Promise<DocEntry[] | null> {
+  const indexResp = await docsFetch(SITEMAP_INDEX_URL)
+  if (indexResp.ok) {
+    const shardUrls: string[] = []
+    for (const match of (await indexResp.text()).matchAll(
+      /<loc>([^<]+)<\/loc>/g
+    )) {
+      const parsed = validateDocsIndexUrl(match[1])
+      if (parsed?.pathname.endsWith('.xml')) {
+        shardUrls.push(parsed.toString())
+      }
+    }
+    if (shardUrls.length > 0) {
+      const entries: DocEntry[] = []
+      for (const shardUrl of shardUrls) {
+        const resp = await docsFetch(shardUrl)
+        if (resp.ok) entries.push(...parseSitemap(await resp.text()))
+      }
+      if (entries.length > 0) return entries
+    }
+  }
+  const resp = await docsFetch(SITEMAP_URL)
+  if (!resp.ok) return null
+  return parseSitemap(await resp.text())
 }
 
 /**
@@ -45,9 +210,11 @@ function parseLlmsTxt(
     // Match markdown links: - [Title](url): Description
     const match = line.match(/^-\s*\[([^\]]+)\]\(([^)]+)\):?\s*(.*)/)
     if (match) {
+      const validated = validateDocsIndexUrl(match[2])
+      if (!validated) continue
       entries.push({
         title: match[1],
-        url: match[2],
+        url: validated.toString(),
         description: match[3] || match[1],
         section: currentSection,
       })
@@ -144,6 +311,9 @@ function formatEntriesSummary(entries: DocEntry[]): string {
 export const docsCommand = {
   description:
     'Fetch Filecoin Onchain Cloud documentation. Search the index with --prompt, or fetch a specific page with --url. Content is filtered to reduce size.',
+  mcp: {
+    annotations: { title: 'Search FOC documentation', readOnlyHint: true },
+  },
   options: z.object({
     prompt: z
       .string()
@@ -155,17 +325,26 @@ export const docsCommand = {
       .string()
       .optional()
       .describe(
-        'Fetch a specific documentation URL (e.g. from the index results)'
+        'Docs page to fetch: a full docs.filecoin.cloud URL or a path relative to it (e.g. developer-guides/synapse.md). Other hosts are rejected.'
       ),
     maxDepth: z
       .number()
+      .int()
+      .min(1)
+      .max(6)
       .optional()
       .describe(
-        'Maximum header depth to include (default 4 = ####). Use 6 for full detail, 2 for high-level overview only.'
+        'Maximum header depth to include, 1-6 (default 4 = ####). Use 6 for full detail, 2 for high-level overview only.'
+      ),
+    deep: z
+      .boolean()
+      .optional()
+      .describe(
+        'Search the full site sitemap (~1,800 pages incl. the complete SDK API reference and changelogs) instead of the ~30-page curated index. Also used automatically when the curated index has no matches.'
       ),
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
-  output: z.object({
+  output: commandOutput({
     source: z.string(),
     content: z.string(),
     matchedEntries: z
@@ -189,10 +368,15 @@ export const docsCommand = {
       description: 'Find docs about split/manual upload workflows',
     },
     {
+      options: { prompt: 'getPdpDataSet', deep: true },
+      description:
+        'Search the full sitemap — SDK API reference pages, changelogs',
+    },
+    {
       options: {
-        url: 'https://docs.filecoin.cloud/developer-guides/storage/storage-operations.md',
+        url: 'developer-guides/storage/storage-operations.md',
       },
-      description: 'Fetch a specific doc page (filtered to #### depth)',
+      description: 'Fetch a doc page by its docs path (filtered to #### depth)',
     },
     {
       options: {
@@ -209,12 +393,19 @@ export const docsCommand = {
     try {
       // If --url is provided, fetch that specific page with depth filtering
       if (c.options.url) {
-        out.step(`Fetching ${c.options.url}`)
-        const resp = await fetch(c.options.url)
+        const docsUrl = resolveDocsUrl(c.options.url)
+        if (!docsUrl) {
+          return out.fail(
+            'INVALID_DOCS_URL',
+            `--url only accepts ${DOCS_HOST} pages. Pass a full https://${DOCS_HOST}/... URL or a docs path like developer-guides/synapse.md`
+          )
+        }
+        out.step(`Fetching ${docsUrl}`)
+        const resp = await docsFetch(docsUrl)
         if (!resp.ok) {
           return out.fail(
             'FETCH_FAILED',
-            `Failed to fetch ${c.options.url}: ${resp.status} ${resp.statusText}`,
+            `Failed to fetch ${docsUrl}: ${resp.status} ${resp.statusText}`,
             {
               retryable: true,
               cta: {
@@ -232,11 +423,29 @@ export const docsCommand = {
         }
 
         const rawContent = await resp.text()
+        if (isHtmlContent(resp, rawContent)) {
+          return out.fail(
+            'HTML_RESPONSE',
+            `${docsUrl} returned HTML instead of markdown — this page has no markdown mirror. Search for the topic instead with --prompt.`,
+            {
+              cta: {
+                description: 'Search the docs index:',
+                commands: [
+                  {
+                    command: 'docs',
+                    options: { prompt: 'getting started' },
+                    description: 'Search for a topic instead of a URL',
+                  },
+                ],
+              },
+            }
+          )
+        }
         const content = filterMarkdownByDepth(rawContent, maxDepth)
 
         return out.done(
           {
-            source: c.options.url,
+            source: docsUrl,
             content,
           },
           {
@@ -248,7 +457,7 @@ export const docsCommand = {
                   ? [
                       {
                         command: 'docs',
-                        options: { url: c.options.url, maxDepth: 6 },
+                        options: { url: docsUrl, maxDepth: 6 },
                         description: 'Fetch this page with full detail',
                       },
                     ]
@@ -266,7 +475,7 @@ export const docsCommand = {
 
       // Default: fetch llms.txt index
       out.step('Fetching docs index')
-      const resp = await fetch(LLMS_TXT_URL)
+      const resp = await docsFetch(LLMS_TXT_URL)
       if (!resp.ok) {
         return out.fail(
           'FETCH_FAILED',
@@ -281,7 +490,42 @@ export const docsCommand = {
       // If --prompt is provided, search and potentially auto-fetch
       if (c.options.prompt) {
         out.step(`Searching for "${c.options.prompt}"`)
-        const matched = matchEntries(allEntries, c.options.prompt)
+        let matched: DocEntry[]
+        if (c.options.deep) {
+          const sitemapEntries = await fetchSitemapEntries()
+          if (!sitemapEntries) {
+            return out.fail(
+              'FETCH_FAILED',
+              `Failed to fetch the site sitemap at ${SITEMAP_URL}`,
+              { retryable: true }
+            )
+          }
+          matched = matchEntries(sitemapEntries, c.options.prompt).slice(
+            0,
+            MAX_DEEP_RESULTS
+          )
+        } else {
+          matched = matchEntries(allEntries, c.options.prompt)
+          if (matched.length === 0) {
+            // The curated index is only ~30 guide pages; before giving up,
+            // search the full sitemap (API reference, changelogs, ...).
+            out.step('No curated matches — searching the full sitemap')
+            const sitemapEntries = await fetchSitemapEntries()
+            if (!sitemapEntries) {
+              // A failed sitemap fetch must not masquerade as "no matches" —
+              // that would tell the agent the topic doesn't exist.
+              return out.fail(
+                'FETCH_FAILED',
+                `No curated matches and the site sitemap could not be fetched (${SITEMAP_INDEX_URL})`,
+                { retryable: true }
+              )
+            }
+            matched = matchEntries(sitemapEntries, c.options.prompt).slice(
+              0,
+              MAX_DEEP_RESULTS
+            )
+          }
+        }
 
         if (matched.length === 0) {
           // No matches — return compact index for browsing
@@ -310,9 +554,12 @@ export const docsCommand = {
           const topEntry = matched[0]
           out.step(`Auto-fetching top match: ${topEntry.title}`)
 
-          const pageResp = await fetch(topEntry.url)
-          if (pageResp.ok) {
-            const rawContent = await pageResp.text()
+          const pageResp = await docsFetch(topEntry.url)
+          // An HTML body means this page has no markdown mirror — treat it
+          // like a failed fetch and fall through to the entry list rather
+          // than handing the agent sidebar markup.
+          const rawContent = pageResp.ok ? await pageResp.text() : null
+          if (rawContent !== null && !isHtmlContent(pageResp, rawContent)) {
             const content = filterMarkdownByDepth(rawContent, maxDepth)
 
             // Include other matches as CTAs

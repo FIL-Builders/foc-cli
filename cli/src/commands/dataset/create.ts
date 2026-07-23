@@ -2,11 +2,18 @@ import * as sp from '@filoz/synapse-core/sp'
 import { getPDPProvider } from '@filoz/synapse-core/sp-registry'
 import { z } from 'incur'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
 export const createCommand = {
-  description: 'Create a new PDP dataset with a storage provider',
+  description:
+    'Create a new PDP dataset with a storage provider. Starts a paid storage rail: an onchain transaction that commits ongoing USDFC charges.',
+  mcp: {
+    annotations: {
+      title: 'Create dataset (starts paid rail)',
+      destructiveHint: false,
+    },
+  },
   args: z.object({
     providerId: z.coerce
       .number()
@@ -21,7 +28,7 @@ export const createCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     dataSetId: z.string(),
     scannerUrl: z.string(),
     providerId: z.string(),
@@ -51,7 +58,7 @@ export const createCommand = {
           'providerId argument required in non-interactive mode',
           {
             retryable: true,
-            cta: {
+            cta: chainCta(c.options.chain, {
               description: 'List providers first:',
               commands: [
                 {
@@ -59,7 +66,7 @@ export const createCommand = {
                   description: 'List available providers',
                 },
               ],
-            },
+            }),
           }
         )
       }
@@ -87,20 +94,22 @@ export const createCommand = {
           providerId: provider.id,
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             description: 'Next steps:',
             commands: [
               {
-                command: 'piece upload',
-                args: {
-                  path: '<file>',
-                  dataSetId: dataset.dataSetId.toString(),
-                },
-                description: 'Upload a piece',
+                command: 'upload',
+                args: { path: '<file>' },
+                description:
+                  'Upload a file — provider selection reuses this dataset when its provider is chosen',
               },
-              { command: 'dataset list', description: 'List all datasets' },
+              {
+                command: 'dataset details',
+                options: { dataSetId: dataset.dataSetId.toString() },
+                description: 'Inspect the new dataset',
+              },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

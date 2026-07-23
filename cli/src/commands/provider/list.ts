@@ -3,12 +3,15 @@ import { getApprovedPDPProviders } from '@filoz/synapse-core/sp-registry'
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { z } from 'incur'
 import { publicClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { dealbotDashboardUrl, formatBytes } from '../../utils.ts'
 
 export const listCommand = {
   description:
     'List all approved PDP storage providers with full details and performance dashboard',
+  mcp: {
+    annotations: { title: 'List storage providers', readOnlyHint: true },
+  },
   options: z.object({
     chain: z
       .number()
@@ -17,7 +20,7 @@ export const listCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     dealbotDashboard: z.string(),
     providers: z.array(
       z.object({
@@ -80,7 +83,7 @@ export const listCommand = {
           providers,
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               {
                 command: 'dataset create',
@@ -91,7 +94,7 @@ export const listCommand = {
                 description: 'Upload a file (auto-selects provider)',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

@@ -2,11 +2,14 @@ import { getPdpDataSets } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { getBlockNumber } from 'viem/actions'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl } from '../../utils.ts'
 
 export const listCommand = {
   description: 'List all PDP datasets with provider info and status',
+  mcp: {
+    annotations: { title: 'List datasets', readOnlyHint: true },
+  },
   options: z.object({
     chain: z
       .number()
@@ -15,7 +18,7 @@ export const listCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     datasets: z.array(
       z.object({
         dataSetId: z.string(),
@@ -57,14 +60,14 @@ export const listCommand = {
       return out.done(
         { datasets, blockNumber },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               {
                 command: 'dataset details',
                 description: 'View pieces and metadata for a dataset',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

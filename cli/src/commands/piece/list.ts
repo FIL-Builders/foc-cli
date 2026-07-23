@@ -2,11 +2,14 @@ import { getPiecesWithMetadata } from '@filoz/synapse-core/pdp-verifier'
 import { getPdpDataSet } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, pieceScannerUrl } from '../../utils.ts'
 
 export const listCommand = {
   description: 'List pieces in a dataset with metadata',
+  mcp: {
+    annotations: { title: 'List pieces in a dataset', readOnlyHint: true },
+  },
   args: z.object({
     dataSetId: z.coerce.number().describe('Dataset ID to list pieces from'),
   }),
@@ -26,7 +29,7 @@ export const listCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     dataSetId: z.string(),
     datasetScannerUrl: z.string(),
     pieces: z.array(
@@ -77,6 +80,7 @@ export const listCommand = {
       })
 
       const nextOffset = offset + piecesList.length
+      const totalPieces = Number(dataSet.activePieceCount)
       const nextPage = hasMore
         ? [
             {
@@ -84,6 +88,12 @@ export const listCommand = {
               args: { dataSetId: c.args.dataSetId },
               options: { offset: nextOffset, limit },
               description: `Show the next page of pieces (offset ${nextOffset})`,
+            },
+            {
+              command: 'piece list',
+              args: { dataSetId: c.args.dataSetId },
+              options: { offset: 0, limit: totalPieces },
+              description: `Fetch all ${totalPieces} pieces in one call`,
             },
           ]
         : []
@@ -97,7 +107,7 @@ export const listCommand = {
           ...(hasMore ? { nextOffset } : {}),
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               ...nextPage,
               {
@@ -107,10 +117,11 @@ export const listCommand = {
               },
               {
                 command: 'dataset details',
+                options: { dataSetId: c.args.dataSetId },
                 description: 'View full dataset details',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

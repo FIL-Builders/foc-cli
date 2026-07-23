@@ -2,11 +2,14 @@ import { getPiecesWithMetadata } from '@filoz/synapse-core/pdp-verifier'
 import { getPdpDataSet } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, pieceScannerUrl } from '../../utils.ts'
 
 export const detailsCommand = {
   description: 'Show dataset metadata and all pieces with their metadata',
+  mcp: {
+    annotations: { title: 'Dataset details', readOnlyHint: true },
+  },
   options: z.object({
     dataSetId: z.coerce.number().describe('Dataset ID to inspect'),
     chain: z
@@ -24,7 +27,7 @@ export const detailsCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c', dataSetId: 'd' },
-  output: z.object({
+  output: commandOutput({
     dataset: z.object({
       dataSetId: z.string(),
       scannerUrl: z.string(),
@@ -102,6 +105,7 @@ export const detailsCommand = {
       })
 
       const nextOffset = offset + piecesList.length
+      const totalPieces = Number(ds.activePieceCount)
       const nextPage = hasMore
         ? [
             {
@@ -112,6 +116,15 @@ export const detailsCommand = {
                 limit,
               },
               description: `Show the next page of pieces (offset ${nextOffset})`,
+            },
+            {
+              command: 'dataset details',
+              options: {
+                dataSetId: c.options.dataSetId,
+                offset: 0,
+                limit: totalPieces,
+              },
+              description: `Fetch all ${totalPieces} pieces in one call`,
             },
           ]
         : []
@@ -124,7 +137,7 @@ export const detailsCommand = {
           ...(hasMore ? { nextOffset } : {}),
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               ...nextPage,
               {
@@ -136,7 +149,7 @@ export const detailsCommand = {
                 description: 'Terminate this dataset',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

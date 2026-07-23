@@ -1,11 +1,14 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { TOKENS } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
 export const balanceCommand = {
   description: 'Check FIL and USDFC wallet balances and payment account info',
+  mcp: {
+    annotations: { title: 'Check wallet balances', readOnlyHint: true },
+  },
   options: z.object({
     chain: z
       .number()
@@ -13,7 +16,7 @@ export const balanceCommand = {
       .describe('Chain ID. 314159 = Calibration, 314 = Mainnet'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     address: z.string(),
     fil: z.string(),
     usdfc: z.string(),
@@ -37,7 +40,45 @@ export const balanceCommand = {
 
       return out.done(result)
     } catch (error) {
-      return out.fail('BALANCE_FETCH_FAILED', (error as Error).message)
+      const message = (error as Error).message
+      // A brand-new address has no onchain actor until it first receives
+      // funds, and this is the first command a new user runs after wallet
+      // init — the raw viem multicall dump must not be their first
+      // impression. The RPC wording varies: older Glif nodes say "actor not
+      // found"; current ones fail the eth_call with "failed to apply on
+      // state with gas" (live-observed 2026-07-23).
+      if (
+        message.includes('actor not found') ||
+        message.includes('failed to apply on state')
+      ) {
+        // The faucet CTA is Calibration-only: wallet fund defaults to 314159
+        // and rejects mainnet, so suggesting it on chain 314 would send an
+        // agent to fund the wrong network. Mainnet gets prose guidance only.
+        const calibration = c.options.chain === 314159
+        return out.fail(
+          'ADDRESS_NOT_ON_CHAIN',
+          `${client.account.address} has no onchain history on chain ${c.options.chain} yet — every balance is zero. ${
+            calibration
+              ? 'Fund it first: wallet fund.'
+              : 'Fund it first by sending FIL and USDFC to the address (there is no mainnet faucet).'
+          }`,
+          calibration
+            ? {
+                cta: chainCta(c.options.chain, {
+                  description: 'Fund this address:',
+                  commands: [
+                    {
+                      command: 'wallet fund',
+                      description:
+                        'Claim free testnet FIL + USDFC (Calibration)',
+                    },
+                  ],
+                }),
+              }
+            : undefined
+        )
+      }
+      return out.fail('BALANCE_FETCH_FAILED', message)
     }
   },
 }

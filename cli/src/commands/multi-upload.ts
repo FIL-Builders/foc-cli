@@ -1,9 +1,11 @@
-import { readFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { access, constants, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import type { StorageContext } from '@filoz/synapse-sdk/storage'
 import { z } from 'incur'
 import type { Hex } from 'viem'
-import { OutputContext } from '../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../output.ts'
 import { selectHealthyProviders } from '../provider-selection.ts'
 import { synapseClient } from '../synapse.ts'
 import {
@@ -25,7 +27,13 @@ type CopyResult = {
 
 export const multiUploadCommand = {
   description:
-    'Upload multiple readable files to Filecoin warm storage (high-level, recommended)',
+    'Upload multiple readable files to Filecoin warm storage (high-level, recommended). Commits USDFC from the payment account via an onchain transaction; defaults to Calibration testnet.',
+  mcp: {
+    annotations: {
+      title: 'Upload multiple files to Filecoin (spends USDFC)',
+      destructiveHint: false,
+    },
+  },
   args: z.object({
     paths: z
       .preprocess(
@@ -48,7 +56,7 @@ export const multiUploadCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     status: z.string(),
     results: z.array(
       z.object({
@@ -92,14 +100,26 @@ export const multiUploadCommand = {
     const { client, chain, synapse } = synapseClient(c.options.chain)
 
     try {
-      out.step('Reading files')
+      out.step('Checking files')
       const absolutePaths = c.args.paths.map((filePath: string) =>
         path.resolve(filePath)
       )
-      const fileResultsSettled = await Promise.allSettled(
-        absolutePaths.map((filePath: string) => readFile(filePath))
+      // All-or-nothing gate without buffering: verify each path is a readable
+      // regular file and collect sizes (for prepare) up front, then stream
+      // each file at store time — peak memory stays flat instead of holding
+      // the whole batch. access+stat alone would pass directories and FIFOs,
+      // which only fail (or block) in store() — after contexts and funding.
+      const fileStatsSettled = await Promise.allSettled(
+        absolutePaths.map(async (filePath: string) => {
+          await access(filePath, constants.R_OK)
+          const stats = await stat(filePath)
+          if (!stats.isFile()) {
+            throw new Error('not a regular file')
+          }
+          return stats.size
+        })
       )
-      const fileReadRejected = fileResultsSettled
+      const fileReadRejected = fileStatsSettled
         .map((result, index) => ({ result, path: absolutePaths[index] }))
         .filter(({ result }) => result.status === 'rejected')
 
@@ -118,19 +138,9 @@ export const multiUploadCommand = {
         )
       }
 
-      const fileResults = fileResultsSettled
+      const fileSizes = fileStatsSettled
         .filter((result) => result.status === 'fulfilled')
         .map((result) => result.value)
-
-      const fileStreams = fileResults.map(
-        (fileResult) =>
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue(fileResult)
-              controller.close()
-            },
-          })
-      )
 
       out.step('Checking provider health')
       const selection = await selectHealthyProviders(
@@ -157,7 +167,7 @@ export const multiUploadCommand = {
       out.step('Preparing upload')
       const prep = await synapse.storage.prepare({
         context: contexts,
-        dataSize: BigInt(fileResults.reduce((acc, f) => acc + f.byteLength, 0)),
+        dataSize: BigInt(fileSizes.reduce((acc, size) => acc + size, 0)),
       })
 
       if (prep.transaction) {
@@ -171,7 +181,9 @@ export const multiUploadCommand = {
       const secondary = contexts.slice(1)
 
       const primaryStoreResultsSettled = await Promise.allSettled(
-        fileStreams.map((fileStream) => primary.store(fileStream))
+        absolutePaths.map((filePath: string) =>
+          primary.store(Readable.toWeb(createReadStream(filePath)))
+        )
       )
       const primaryStoreResults = primaryStoreResultsSettled
         .filter((r) => r.status === 'fulfilled')
@@ -251,13 +263,13 @@ export const multiUploadCommand = {
       return out.done(
         { status: 'uploaded', results },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             description: 'Next steps:',
             commands: [
               { command: 'dataset list', description: 'View all datasets' },
               { command: 'wallet balance', description: 'Check balances' },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

@@ -1,15 +1,23 @@
-import { readFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 import type { FailedAttempt } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { OutputContext } from '../output.ts'
+import { commandOutput, OutputContext } from '../output.ts'
 import { selectHealthyProviders } from '../provider-selection.ts'
 import { synapseClient } from '../synapse.ts'
 import { datasetScannerUrl, hashLink, pieceScannerUrl } from '../utils.ts'
 
 export const uploadCommand = {
   description:
-    'Upload a file to Filecoin warm storage (high-level, recommended)',
+    'Upload a file to Filecoin warm storage (high-level, recommended). Commits USDFC from the payment account via an onchain transaction; defaults to Calibration testnet.',
+  mcp: {
+    annotations: {
+      title: 'Upload file to Filecoin (spends USDFC)',
+      destructiveHint: false,
+    },
+  },
   args: z.object({
     path: z.string().describe('File path to upload'),
   }),
@@ -27,7 +35,7 @@ export const uploadCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     status: z.string(),
     result: z.object({
       pieceCid: z.string(),
@@ -78,15 +86,23 @@ export const uploadCommand = {
     const { client, chain, synapse } = synapseClient(c.options.chain)
 
     try {
-      out.step('Reading file')
+      out.step('Opening file')
+      // Stream the file straight through Synapse to the primary provider —
+      // never buffer the whole piece in memory. Only the size is needed up
+      // front (for prepare), which stat provides without reading a byte.
       const absolutePath = path.resolve(c.args.path)
-      const file = await readFile(absolutePath)
-      const fileStream = new ReadableStream({
-        start(controller) {
-          controller.enqueue(file)
-          controller.close()
-        },
-      })
+      const stats = await stat(absolutePath)
+      // stat() succeeds for directories, FIFOs, sockets, and devices — their
+      // size would flow into prepare() and a funding transaction could execute
+      // before createReadStream errored or blocked. Reject non-regular files
+      // here, before any provider selection or onchain spend.
+      if (!stats.isFile()) {
+        return out.fail(
+          'NOT_A_FILE',
+          `${absolutePath} is not a regular file. Pass a path to a readable file.`
+        )
+      }
+      const { size } = stats
 
       out.step('Checking provider health')
       const selection = await selectHealthyProviders(
@@ -113,7 +129,7 @@ export const uploadCommand = {
       out.step('Preparing upload')
       const prep = await synapse.storage.prepare({
         context: contexts,
-        dataSize: BigInt(file.byteLength),
+        dataSize: BigInt(size),
       })
 
       if (prep.transaction) {
@@ -123,10 +139,12 @@ export const uploadCommand = {
       }
 
       out.step('Uploading file')
-      const result = await synapse.storage.upload(fileStream, {
-        contexts,
-        withCDN: c.options.withCDN,
-      })
+      // Open the stream only now — immediately before it is consumed — so a
+      // file that vanished or changed since stat surfaces here, not earlier.
+      const fileStream = Readable.toWeb(createReadStream(absolutePath))
+      // CDN preference is already baked into the contexts; the SDK rejects
+      // upload({ contexts, withCDN }) outright, so pass contexts alone.
+      const result = await synapse.storage.upload(fileStream, { contexts })
 
       const cidStr = result.pieceCid.toString()
       const copyResults = result.copies.map((copy) => ({

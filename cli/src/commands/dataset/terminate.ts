@@ -1,11 +1,18 @@
 import { terminateServiceSync } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
 export const terminateCommand = {
-  description: 'Terminate a PDP dataset (stops storage service)',
+  description:
+    'Terminate a PDP dataset (stops storage service). Irreversible: ends the paid rail and releases the providers from proving they hold its pieces.',
+  mcp: {
+    annotations: {
+      title: 'Terminate dataset (irreversible)',
+      destructiveHint: true,
+    },
+  },
   args: z.object({
     dataSetId: z.coerce
       .number()
@@ -19,7 +26,7 @@ export const terminateCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     dataSetId: z.string(),
     scannerUrl: z.string(),
     status: z.string(),
@@ -45,14 +52,14 @@ export const terminateCommand = {
           status: 'terminated',
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               {
                 command: 'dataset list',
                 description: 'View remaining datasets',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

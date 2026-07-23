@@ -3,10 +3,13 @@ import { formatBalance } from '@filoz/synapse-core/utils'
 import { z } from 'incur'
 import { maxUint256 } from 'viem'
 import { privateKeyClient } from '../../client.ts'
-import { OutputContext } from '../../output.ts'
+import { commandOutput, OutputContext } from '../../output.ts'
 
 export const summaryCommand = {
   description: 'Get payment account summary with funding timeline',
+  mcp: {
+    annotations: { title: 'Payment account summary', readOnlyHint: true },
+  },
   options: z.object({
     chain: z
       .number()
@@ -15,7 +18,7 @@ export const summaryCommand = {
     debug: z.boolean().optional().describe('Enable debug mode'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     availableFunds: z.string(),
     timeRemaining: z.string(),
     totalLockup: z.string(),
@@ -60,11 +63,16 @@ function formatTimeUntilFunded(summary: getAccountSummary.OutputType) {
   if (summary.runwayInEpochs === maxUint256) {
     return 'No active storage, unlimited'
   }
-  const secondsUntilFunded = summary.runwayInEpochs * 30n
-  const hoursUntilFunded = secondsUntilFunded / 60n / 60n
-  const daysUntilFunded = hoursUntilFunded / 24n
-  const weeksUntilFunded = daysUntilFunded / 7n
-  const monthsUntilFunded = weeksUntilFunded / 4n
-  const yearsUntilFunded = monthsUntilFunded / 12n
-  return `${hoursUntilFunded}h ${daysUntilFunded}d ${weeksUntilFunded}w ${monthsUntilFunded}m ${yearsUntilFunded}y`
+  // One unit, the largest that fits — the old format concatenated the SAME
+  // duration in five units ("17468h 727d 103w 25m 2y"), which read as
+  // nonsense. "mo" for months so it can't be misread as minutes.
+  const seconds = summary.runwayInEpochs * 30n
+  const hours = seconds / 3600n
+  if (hours < 1n) return '<1h'
+  if (hours < 48n) return `~${hours}h`
+  const days = hours / 24n
+  if (days < 60n) return `~${days}d`
+  const months = days / 30n
+  if (months < 24n) return `~${months}mo`
+  return `~${(days + 182n) / 365n}y`
 }

@@ -1,19 +1,17 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
-  calculate,
   cid,
   claimTokens,
   configStore,
   createDataSet,
-  createDataSetAndAddPieces,
   fakeProvider,
   fakeWalletClient,
   fetchMock,
   fetchProviderSelectionInput,
-  findPiece,
   formatBalance,
   getAccountSummary,
   getApprovedPDPProviders,
@@ -32,15 +30,16 @@ import {
   synapseStorage,
   synapseWaitForTransactionReceipt,
   terminateServiceSync,
-  uploadPiece,
   waitForCreateDataSet,
-  waitForCreateDataSetAddPieces,
   waitForTransactionReceipt,
 } from './command-mocks.ts'
 
 const { uploadCommand } = await import('../src/commands/upload.ts')
 const { multiUploadCommand } = await import('../src/commands/multi-upload.ts')
+const { downloadCommand } = await import('../src/commands/download.ts')
+const { docsCommand } = await import('../src/commands/docs.ts')
 const { balanceCommand } = await import('../src/commands/wallet/balance.ts')
+const { initCommand } = await import('../src/commands/wallet/init.ts')
 const { costsCommand } = await import('../src/commands/wallet/costs.ts')
 const { depositCommand } = await import('../src/commands/wallet/deposit.ts')
 const { fundCommand } = await import('../src/commands/wallet/fund.ts')
@@ -61,9 +60,6 @@ const { listCommand: datasetListCommand } = await import(
 const { terminateCommand: datasetTerminateCommand } = await import(
   '../src/commands/dataset/terminate.ts'
 )
-const { uploadCommand: datasetUploadCommand } = await import(
-  '../src/commands/dataset/upload.ts'
-)
 const { listCommand: pieceListCommand } = await import(
   '../src/commands/piece/list.ts'
 )
@@ -78,12 +74,14 @@ const tempDirs: string[] = []
 function commandContext({
   args = {},
   options = {},
+  agent = true,
 }: {
   args?: Record<string, any>
   options?: Record<string, any>
+  agent?: boolean
 } = {}) {
   return {
-    agent: true,
+    agent,
     args,
     options: {
       chain: 314159,
@@ -194,9 +192,11 @@ describe('top-level upload commands', () => {
       dataSize: 4n,
     })
     expect(execute).toHaveBeenCalled()
+    // The SDK contract: upload() rejects any other option (withCDN,
+    // providerIds, dataSetIds) once contexts are supplied — CDN preference
+    // must ride in via createContexts only.
     expect(synapseStorage.upload).toHaveBeenCalledWith(expect.anything(), {
       contexts,
-      withCDN: true,
     })
     expect(result.status).toBe('uploaded')
     expect(result.result).toEqual({
@@ -417,6 +417,36 @@ describe('top-level upload commands', () => {
     expect(synapseStorage.createContexts).not.toHaveBeenCalled()
     expect(synapseStorage.upload).not.toHaveBeenCalled()
   })
+
+  // A directory passes stat() with a size, so without an isFile() gate the
+  // funding transaction could execute before the stream ever failed.
+  test('upload rejects a directory before contexts or prepare can run', async () => {
+    const insideDir = await tempFile('marker.txt', 'x')
+    const dir = path.dirname(insideDir)
+
+    const result = await uploadCommand.run(
+      commandContext({ args: { path: dir } })
+    )
+
+    expect(result.error.code).toBe('NOT_A_FILE')
+    expect(result.error.message).toContain(dir)
+    expect(synapseStorage.createContexts).not.toHaveBeenCalled()
+    expect(synapseStorage.prepare).not.toHaveBeenCalled()
+  })
+
+  test('multi-upload rejects a batch mixing a regular file and a directory before contexts or prepare', async () => {
+    const readable = await tempFile('readable.txt', 'ok')
+    const dir = path.dirname(readable)
+
+    const result = await multiUploadCommand.run(
+      commandContext({ args: { paths: [readable, dir] } })
+    )
+
+    expect(result.error.code).toBe('FILE_READ_FAILED')
+    expect(result.error.message).toContain(dir)
+    expect(synapseStorage.createContexts).not.toHaveBeenCalled()
+    expect(synapseStorage.prepare).not.toHaveBeenCalled()
+  })
 })
 
 describe('wallet commands', () => {
@@ -438,6 +468,201 @@ describe('wallet commands', () => {
       lockupLastSettledAt: 'formatted:6000',
       funds: 'formatted:7000',
     })
+  })
+
+  test('wallet balance on a brand-new address humanizes the actor-not-found dump', async () => {
+    synapsePayments.walletBalance.mockImplementationOnce(async () => {
+      throw new Error(
+        'The contract function "balanceOf" reverted.\n\nmulticall3... actor not found (RetCode=1)'
+      )
+    })
+
+    const result = await balanceCommand.run(commandContext())
+
+    expect(result.error.code).toBe('ADDRESS_NOT_ON_CHAIN')
+    expect(result.error.message).toContain('no onchain history')
+    expect(result.error.message).toContain(fakeWalletClient.account.address)
+    expect(result.cta.commands[0]).toMatchObject({ command: 'wallet fund' })
+  })
+
+  // Live-observed 2026-07-23: current Glif Calibration nodes report a fresh
+  // address as "failed to apply on state with gas" instead of "actor not
+  // found" — both must map to the humanized envelope.
+  test('wallet balance humanizes the newer failed-to-apply-on-state RPC variant', async () => {
+    synapsePayments.walletBalance.mockImplementationOnce(async () => {
+      throw new Error(
+        'RPC Request failed.\n\nDetails: RPC error (-32603): failed to apply on state with gas'
+      )
+    })
+
+    const result = await balanceCommand.run(commandContext())
+
+    expect(result.error.code).toBe('ADDRESS_NOT_ON_CHAIN')
+    expect(result.cta.commands[0]).toMatchObject({ command: 'wallet fund' })
+  })
+
+  // wallet fund is Calibration-only; recommending it on mainnet would point
+  // an agent's funding workflow at the wrong network.
+  test('wallet balance on mainnet never suggests the testnet faucet', async () => {
+    synapsePayments.walletBalance.mockImplementationOnce(async () => {
+      throw new Error('multicall3... actor not found (RetCode=1)')
+    })
+
+    const result = await balanceCommand.run(
+      commandContext({ options: { chain: 314 } })
+    )
+
+    expect(result.error.code).toBe('ADDRESS_NOT_ON_CHAIN')
+    expect(result.error.message).toContain('no mainnet faucet')
+    expect(result.cta).toBeUndefined()
+  })
+
+  test('wallet init --keystore rejects a directory instead of configuring it', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'foc-cli-test-'))
+    tempDirs.push(dir)
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: dir }, agent: false })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INVALID')
+    expect(result.error.message).toContain('directory')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keystore',
+      expect.anything()
+    )
+  })
+
+  test('wallet init --keystore rejects a file that is not an encrypted keystore', async () => {
+    const filePath = await tempFile('not-a-keystore.json', '{"hello":"world"}')
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: filePath }, agent: false })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INVALID')
+    expect(result.error.message).toContain('crypto')
+  })
+
+  test('wallet init --keystore reports a missing path as KEYSTORE_NOT_FOUND', async () => {
+    const result = await initCommand.run(
+      commandContext({
+        options: { keystore: '/nonexistent-dir-8f2k/ks.json' },
+        agent: false,
+      })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_NOT_FOUND')
+  })
+
+  test('wallet init --keystore accepts a keystore-shaped file and clears any raw key', async () => {
+    const filePath = await tempFile(
+      'keystore.json',
+      JSON.stringify({ crypto: { cipher: 'aes-128-ctr' }, id: 'x', version: 3 })
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: filePath }, agent: false })
+    )
+
+    expect(configStore.set).toHaveBeenCalledWith('keystore', filePath)
+    expect(configStore.delete).toHaveBeenCalledWith('privateKey')
+    expect(result).toMatchObject({
+      status: 'configured',
+      method: 'keystore',
+      path: filePath,
+    })
+  })
+
+  // Without the isFile() gate this test HANGS: readFileSync on a FIFO with no
+  // writer blocks the process, which is exactly the failure being prevented.
+  test('wallet init --keystore rejects a FIFO instead of reading it', async () => {
+    const marker = await tempFile('marker.txt', 'x')
+    const fifoPath = path.join(path.dirname(marker), 'keystore.fifo')
+    execFileSync('mkfifo', [fifoPath])
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: fifoPath }, agent: false })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INVALID')
+    expect(result.error.message).toContain('regular file')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keystore',
+      expect.anything()
+    )
+  })
+
+  test('wallet init --keystore rejects JSON whose crypto field is not an object', async () => {
+    const filePath = await tempFile(
+      'fake-keystore.json',
+      JSON.stringify({ crypto: 'not-an-object' })
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: filePath }, agent: false })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INVALID')
+  })
+
+  test('wallet init --keystore is rejected in agent mode before touching config', async () => {
+    const filePath = await tempFile(
+      'keystore.json',
+      JSON.stringify({ crypto: { cipher: 'aes-128-ctr' }, id: 'x', version: 3 })
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: filePath } })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INTERACTIVE_ONLY')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keystore',
+      expect.anything()
+    )
+  })
+
+  // Explicit methods must replace the configured wallet — the old ordering
+  // returned already_configured and kept the previous credential.
+  test('wallet init --auto replaces an existing private key', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'privateKey' ? '0xold' : undefined
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { auto: true } })
+    )
+
+    expect(result.status).toBe('configured')
+    expect(result.method).toBe('auto')
+    expect(configStore.set).toHaveBeenCalledWith(
+      'privateKey',
+      expect.stringMatching(/^0x[a-fA-F0-9]{64}$/)
+    )
+  })
+
+  test('wallet init --auto clears a configured keystore so the new key wins', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'keystore' ? '/home/user/.foundry/keystores/foc' : undefined
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { auto: true } })
+    )
+
+    expect(result.status).toBe('configured')
+    expect(configStore.delete).toHaveBeenCalledWith('keystore')
+  })
+
+  test('wallet init agent guidance no longer offers the interactive-only keystore method', async () => {
+    const result = await initCommand.run(commandContext())
+
+    expect(result.error.code).toBe('INIT_METHOD_REQUIRED')
+    const offered = result.cta.commands.map((cmd: any) => cmd.options)
+    expect(offered).not.toContainEqual(
+      expect.objectContaining({ keystore: expect.anything() })
+    )
   })
 
   test('wallet deposit parses the amount, deposits with permit, and waits for the transaction', async () => {
@@ -479,15 +704,47 @@ describe('wallet commands', () => {
   })
 
   test('wallet costs prepares storage for the requested bytes and runway', async () => {
+    const activeDataSet = {
+      dataSetId: 42n,
+      providerId: 77n,
+      live: true,
+      managed: true,
+      pdpEndEpoch: 0n,
+    }
+    // Same provider as activeDataSet — still costed as its own context
+    const sameProviderDataSet = { ...activeDataSet, dataSetId: 43n }
+    const terminatingDataSet = {
+      ...activeDataSet,
+      dataSetId: 44n,
+      providerId: 78n,
+      pdpEndEpoch: 999n,
+    }
+    getPdpDataSets.mockResolvedValueOnce([
+      activeDataSet,
+      sameProviderDataSet,
+      terminatingDataSet,
+    ] as any)
+
     const result = await costsCommand.run(
       commandContext({
         options: { extraBytes: 1024, extraRunway: 2 },
       })
     )
 
+    expect(getPdpDataSets).toHaveBeenCalledWith(fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+    })
+    expect(synapseStorage.createContext).toHaveBeenCalledTimes(2)
+    expect(synapseStorage.createContext).toHaveBeenCalledWith({
+      dataSetId: 42n,
+    })
+    expect(synapseStorage.createContext).toHaveBeenCalledWith({
+      dataSetId: 43n,
+    })
     expect(synapseStorage.prepare).toHaveBeenCalledWith({
       dataSize: 1024n,
       extraRunwayEpochs: 172800n,
+      context: [{ dataSetId: 42n }, { dataSetId: 43n }],
     })
     expect(formatBalance).toHaveBeenNthCalledWith(1, { value: 111n })
     expect(formatBalance).toHaveBeenNthCalledWith(2, { value: 222n })
@@ -497,6 +754,94 @@ describe('wallet commands', () => {
       alreadyCovered: true,
       needsFwssMaxApproval: false,
       processLog: [{ step: 'Getting costs', status: 'done' }],
+    })
+  })
+
+  test('wallet costs prices two new datasets for an empty wallet without provider selection', async () => {
+    getPdpDataSets.mockResolvedValueOnce([] as any)
+
+    const result = await costsCommand.run(
+      commandContext({
+        options: { extraBytes: 1024, extraRunway: 1 },
+      })
+    )
+
+    expect(synapseStorage.createContexts).not.toHaveBeenCalled()
+    expect(synapseStorage.createContext).not.toHaveBeenCalled()
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: [
+        { dataSetId: undefined, withCDN: false },
+        { dataSetId: undefined, withCDN: false },
+      ],
+    })
+    expect(result).toMatchObject({ alreadyCovered: true })
+  })
+
+  // prepare() applies extraBytes once per supplied context, so the estimate
+  // must price the copies the next upload will write — not every dataset the
+  // wallet has ever created.
+  test('wallet costs with one active dataset prices the second copy as a new dataset', async () => {
+    getPdpDataSets.mockResolvedValueOnce([
+      {
+        dataSetId: 42n,
+        providerId: 77n,
+        live: true,
+        managed: true,
+        pdpEndEpoch: 0n,
+      },
+    ] as any)
+
+    await costsCommand.run(
+      commandContext({ options: { extraBytes: 1024, extraRunway: 1 } })
+    )
+
+    expect(synapseStorage.createContext).toHaveBeenCalledTimes(1)
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: [{ dataSetId: 42n }, { dataSetId: undefined, withCDN: false }],
+    })
+  })
+
+  test('wallet costs with three active datasets prices only the requested copies', async () => {
+    const base = { providerId: 77n, live: true, managed: true, pdpEndEpoch: 0n }
+    getPdpDataSets.mockResolvedValueOnce([
+      { ...base, dataSetId: 42n },
+      { ...base, dataSetId: 43n },
+      { ...base, dataSetId: 44n },
+    ] as any)
+
+    await costsCommand.run(
+      commandContext({ options: { extraBytes: 1024, extraRunway: 1 } })
+    )
+
+    expect(synapseStorage.createContext).toHaveBeenCalledTimes(2)
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: [{ dataSetId: 42n }, { dataSetId: 43n }],
+    })
+  })
+
+  test('wallet costs --copies overrides how many contexts are priced', async () => {
+    getPdpDataSets.mockResolvedValueOnce([] as any)
+
+    await costsCommand.run(
+      commandContext({
+        options: { extraBytes: 1024, extraRunway: 1, copies: 3, withCDN: true },
+      })
+    )
+
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: [
+        { dataSetId: undefined, withCDN: true },
+        { dataSetId: undefined, withCDN: true },
+        { dataSetId: undefined, withCDN: true },
+      ],
     })
   })
 
@@ -527,12 +872,29 @@ describe('wallet commands', () => {
     })
     expect(result).toMatchObject({
       availableFunds: 'formatted:1',
-      timeRemaining: '1h 0d 0w 0m 0y',
+      timeRemaining: '~1h',
       totalLockup: 'formatted:2',
       rateBasedLockup: 'formatted:3',
       monthlyAccountRate: 'formatted:4',
       funds: 'formatted:5',
     })
+  })
+
+  // The old formatter concatenated the same duration in five units
+  // ("17468h 727d 103w 25m 2y"); each runway must render as ONE unit.
+  test('wallet summary renders the funding runway in a single unit', async () => {
+    getAccountSummary.mockImplementationOnce(async () => ({
+      availableFunds: 1n,
+      totalLockup: 2n,
+      totalRateBasedLockup: 3n,
+      lockupRatePerMonth: 4n,
+      funds: 5n,
+      runwayInEpochs: 2096160n, // 17468 hours ≈ 2 years
+    }))
+
+    const result = await summaryCommand.run(commandContext())
+
+    expect(result.timeRemaining).toBe('~2y')
   })
 })
 
@@ -608,53 +970,6 @@ describe('dataset commands', () => {
     })
     expect(getPDPProvider).not.toHaveBeenCalled()
     expect(createDataSet).not.toHaveBeenCalled()
-  })
-
-  test('dataset upload calculates the piece, uploads to the provider, and creates the dataset with metadata', async () => {
-    const filePath = await tempFile('dataset-file.txt', 'piece')
-
-    const result = await datasetUploadCommand.run(
-      commandContext({
-        args: { path: filePath, providerId: 77 },
-        options: { cdn: false },
-      })
-    )
-
-    expect(calculate).toHaveBeenCalled()
-    const uploadedPieceCid = uploadPiece.mock.calls[0]?.[0]?.pieceCid
-    expect(uploadedPieceCid?.toString()).toBe('baga-calculated')
-    expect(uploadedPieceCid).not.toHaveProperty('then')
-    expect(uploadPiece).toHaveBeenCalledWith({
-      data: expect.any(Buffer),
-      serviceURL: 'https://provider.example',
-      pieceCid: uploadedPieceCid,
-    })
-    expect(findPiece).toHaveBeenCalledWith({
-      pieceCid: uploadedPieceCid,
-      serviceURL: 'https://provider.example',
-      poll: true,
-    })
-    expect(createDataSetAndAddPieces).toHaveBeenCalledWith(fakeWalletClient, {
-      serviceURL: 'https://provider.example',
-      payee: fakeProvider.payee,
-      cdn: false,
-      pieces: [
-        {
-          pieceCid: uploadedPieceCid,
-          metadata: { name: 'dataset-file.txt' },
-        },
-      ],
-    })
-    expect(waitForCreateDataSetAddPieces).toHaveBeenCalledWith({
-      statusUrl: 'https://provider.example/status',
-    })
-    expect(result).toMatchObject({
-      pieceCid: 'baga-calculated',
-      pieceScannerUrl: 'https://pdp.vxb.ai/calibration/piece/baga-calculated',
-      dataSetId: '43',
-      datasetScannerUrl: 'https://pdp.vxb.ai/calibration/dataset/43',
-      pieceIds: ['8'],
-    })
   })
 
   test('dataset list maps datasets and current block number', async () => {
@@ -790,8 +1105,13 @@ describe('dataset commands', () => {
     expect(result.nextOffset).toBe(6)
     expect(result.cta.commands).toContainEqual({
       command: 'dataset details',
-      options: { dataSetId: 42, offset: 6, limit: 1 },
+      options: { chain: 314159, dataSetId: 42, offset: 6, limit: 1 },
       description: 'Show the next page of pieces (offset 6)',
+    })
+    expect(result.cta.commands).toContainEqual({
+      command: 'dataset details',
+      options: { chain: 314159, dataSetId: 42, offset: 0, limit: 2 },
+      description: 'Fetch all 2 pieces in one call',
     })
   })
 })
@@ -857,8 +1177,14 @@ describe('piece commands', () => {
     expect(result.cta.commands).toContainEqual({
       command: 'piece list',
       args: { dataSetId: 42 },
-      options: { offset: 6, limit: 1 },
+      options: { chain: 314159, offset: 6, limit: 1 },
       description: 'Show the next page of pieces (offset 6)',
+    })
+    expect(result.cta.commands).toContainEqual({
+      command: 'piece list',
+      args: { dataSetId: 42 },
+      options: { chain: 314159, offset: 0, limit: 2 },
+      description: 'Fetch all 2 pieces in one call',
     })
   })
 
@@ -982,5 +1308,663 @@ describe('synapse client construction', () => {
       client: fakeWalletClient,
       source: 'my-app',
     })
+  })
+})
+
+describe('download command', () => {
+  test('download retrieves validated bytes and writes them to the output path', async () => {
+    // A sibling of a real temp file, but not pre-created: default download
+    // mode is exclusive creation and refuses existing paths.
+    const marker = await tempFile('marker.txt', '')
+    const outPath = path.join(path.dirname(marker), 'downloaded.bin')
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: outPath },
+      })
+    )
+
+    expect(synapseStorage.download).toHaveBeenCalledWith({
+      pieceCid: 'baga-piece',
+    })
+    expect(result).toMatchObject({
+      pieceCid: 'baga-piece',
+      pieceScannerUrl: 'https://pdp.vxb.ai/calibration/piece/baga-piece',
+      size: 4,
+      verified: true,
+      path: outPath,
+    })
+    const written = await readFile(outPath)
+    expect([...written]).toEqual([1, 2, 3, 4])
+  })
+
+  test('download passes withCDN and providerAddress through to the SDK', async () => {
+    const marker = await tempFile('marker.txt', '')
+    const outPath = path.join(path.dirname(marker), 'cdn.bin')
+    await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: outPath, withCDN: true, providerAddress: '0xprovider' },
+      })
+    )
+
+    expect(synapseStorage.download).toHaveBeenCalledWith({
+      pieceCid: 'baga-piece',
+      withCDN: true,
+      providerAddress: '0xprovider',
+    })
+  })
+
+  test('download reports a retryable failure when retrieval fails', async () => {
+    synapseStorage.download.mockImplementationOnce(async () => {
+      throw new Error('All provider retrieval attempts failed')
+    })
+    const result = await downloadCommand.run(
+      commandContext({ args: { pieceCid: 'baga-piece' } })
+    )
+
+    expect(result.error).toMatchObject({
+      code: 'DOWNLOAD_FAILED',
+      retryable: true,
+    })
+  })
+
+  test('download reports an invalid piece CID as non-retryable', async () => {
+    synapseStorage.download.mockImplementationOnce(async () => {
+      throw new Error('Invalid PieceCID: nope')
+    })
+    const result = await downloadCommand.run(
+      commandContext({ args: { pieceCid: 'nope' } })
+    )
+
+    expect(result.error.code).toBe('INVALID_PIECE_CID')
+    expect(result.error.retryable).toBeUndefined()
+  })
+})
+
+describe('docs command url restriction', () => {
+  test('docs --url resolves a bare docs path against docs.filecoin.cloud', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Page\n\ncontent', { status: 200 })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse.md' } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/developer-guides/synapse.md',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/developer-guides/synapse.md'
+    )
+    expect(result.content).toContain('# Page')
+  })
+
+  test('docs --url upgrades http docs URLs to https and strips nothing else', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Start', { status: 200 })
+    )
+    await docsCommand.run(
+      commandContext({
+        options: { url: 'http://docs.filecoin.cloud/getting-started.md' },
+      })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/getting-started.md',
+      expect.anything()
+    )
+  })
+
+  test('docs --url rejects non-docs hosts without fetching', async () => {
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'https://evil.example.com/page.md' } })
+    )
+
+    expect(result.error.code).toBe('INVALID_DOCS_URL')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test('docs --url rejects path traversal in bare paths', async () => {
+    const result = await docsCommand.run(
+      commandContext({ options: { url: '../../etc/passwd' } })
+    )
+
+    expect(result.error.code).toBe('INVALID_DOCS_URL')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('docs command markdown normalization', () => {
+  test('docs --url rewrites extensionless paths to their .md mirror', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Synapse', { status: 200 })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse' } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/developer-guides/synapse.md',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/developer-guides/synapse.md'
+    )
+  })
+
+  test('docs --url rewrites trailing-slash site URLs to their .md mirror', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# TOC', { status: 200 })
+    )
+    await docsCommand.run(
+      commandContext({
+        options: {
+          url: 'https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc/',
+        },
+      })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc.md',
+      expect.anything()
+    )
+  })
+
+  test('docs --url refuses to return HTML when no markdown mirror exists', async () => {
+    fetchMock.mockImplementationOnce(
+      async () =>
+        new Response('<!DOCTYPE html><html><body>sidebar soup</body></html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'llms.txt' } })
+    )
+
+    expect(result.error.code).toBe('HTML_RESPONSE')
+    expect(result.error.message).toContain('markdown')
+  })
+})
+
+describe('docs command deep sitemap search', () => {
+  const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset><url><loc>https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc/</loc></url>
+<url><loc>https://docs.filecoin.cloud/developer-guides/payments/payment-operations/</loc></url>
+<url><loc>https://docs.filecoin.cloud/changelog-sdk/v1-1-0/</loc></url></urlset>`
+
+  test('docs --deep searches the sitemap and auto-fetches the top .md mirror', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response('- [Payments](https://docs.filecoin.cloud/x.md): pay', {
+            status: 200,
+          })
+      ) // llms.txt index
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-index.xml → fall back to single shard
+      .mockImplementationOnce(
+        async () => new Response(SITEMAP_XML, { status: 200 })
+      ) // sitemap-0.xml
+      .mockImplementationOnce(
+        async () => new Response('# getPdpDataSet', { status: 200 })
+      ) // auto-fetched page
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'getPdpDataSet', deep: true } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/sitemap-0.xml',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc.md'
+    )
+    expect(result.content).toContain('getPdpDataSet')
+    expect(result.matchedEntries).toHaveLength(1)
+  })
+
+  test('docs falls back to the sitemap when the curated index has no matches', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response('- [Payments](https://docs.filecoin.cloud/x.md): pay', {
+            status: 200,
+          })
+      ) // llms.txt — no match for the prompt
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-index.xml → fall back to single shard
+      .mockImplementationOnce(
+        async () => new Response(SITEMAP_XML, { status: 200 })
+      ) // sitemap-0.xml fallback
+      .mockImplementationOnce(
+        async () => new Response('# getPdpDataSet', { status: 200 })
+      ) // auto-fetched page
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'getpdpdataset' } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/sitemap-0.xml',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/reference/filoz/synapse-core/warm-storage/namespaces/getpdpdataset/toc.md'
+    )
+  })
+})
+
+describe('docs command index url allowlist', () => {
+  // The curated index arrives over the network; a planted external link must
+  // be dropped at parse time, never auto-fetched.
+  test('docs auto-fetch never follows an external host planted in llms.txt', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response(
+            [
+              '- [Evil payments](https://evil.example.com/payments.md): payments',
+              '- [Payments](https://docs.filecoin.cloud/payments.md): payments',
+            ].join('\n'),
+            { status: 200 }
+          )
+      ) // llms.txt with a planted external entry
+      .mockImplementationOnce(
+        async () => new Response('# Payments', { status: 200 })
+      ) // auto-fetched page — must be the docs-host entry
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'payments' } })
+    )
+
+    expect(result.source).toBe('https://docs.filecoin.cloud/payments.md')
+    const fetchedUrls = fetchMock.mock.calls.map((call: any[]) => call[0])
+    expect(fetchedUrls).not.toContain('https://evil.example.com/payments.md')
+    expect(result.matchedEntries).toHaveLength(1)
+  })
+
+  test('sitemap entries off the docs host are dropped', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () => new Response('# nothing relevant', { status: 200 })
+      ) // llms.txt — no entries at all
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-index.xml → single-shard fallback
+      .mockImplementationOnce(
+        async () =>
+          new Response(
+            '<urlset><url><loc>https://evil.example.com/payments/</loc></url></urlset>',
+            { status: 200 }
+          )
+      ) // sitemap-0.xml with only an external loc
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'payments' } })
+    )
+
+    const fetchedUrls = fetchMock.mock.calls.map((call: any[]) => call[0])
+    expect(
+      fetchedUrls.some((url: string) => url.includes('evil.example.com'))
+    ).toBe(false)
+    expect(result.matchedEntries).toHaveLength(0)
+  })
+})
+
+describe('docs command attribution', () => {
+  test('docs requests identify foc-cli via User-Agent with version and source tag', async () => {
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Page', { status: 200 })
+    )
+    await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse.md' } })
+    )
+
+    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit]
+    const userAgent = (init.headers as Record<string, string>)['user-agent']
+    expect(userAgent).toMatch(/^foc-cli\/\d+\.\d+\.\d+ /)
+    expect(userAgent).toContain('source=foc-cli')
+    expect(userAgent).toContain('github.com/FIL-Builders/foc-cli')
+  })
+
+  test('docs User-Agent carries a custom source tag from config', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'source' ? 'my-app' : undefined
+    )
+    fetchMock.mockImplementationOnce(
+      async () => new Response('# Page', { status: 200 })
+    )
+    await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse.md' } })
+    )
+
+    const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit]
+    expect((init.headers as Record<string, string>)['user-agent']).toContain(
+      'source=my-app'
+    )
+  })
+})
+
+describe('download error taxonomy', () => {
+  test('CID-mismatch integrity failures are NOT retryable and get a distinct code', async () => {
+    synapseStorage.download.mockImplementationOnce(async () => {
+      throw new Error(
+        'Failed to download piece.\n\nDetails: PieceCID verification failed. Expected: baga-a, Got: baga-b'
+      )
+    })
+    const result = await downloadCommand.run(
+      commandContext({ args: { pieceCid: 'baga-piece' } })
+    )
+
+    expect(result.error.code).toBe('INTEGRITY_MISMATCH')
+    expect(result.error.retryable).toBeUndefined()
+    expect(result.cta.commands[0]).toMatchObject({ command: 'download' })
+  })
+
+  test('unknown --providerAddress is a non-retryable PROVIDER_NOT_FOUND', async () => {
+    synapseStorage.download.mockImplementationOnce(async () => {
+      throw new Error('Provider 0xdead not found')
+    })
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { providerAddress: '0xdead' },
+      })
+    )
+
+    expect(result.error.code).toBe('PROVIDER_NOT_FOUND')
+    expect(result.error.retryable).toBeUndefined()
+  })
+
+  test('local write failures after a validated download are WRITE_FAILED, not retryable retrieval errors', async () => {
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: '/nonexistent-dir-fjq38/x.bin' },
+      })
+    )
+
+    expect(result.error.code).toBe('WRITE_FAILED')
+    expect(result.error.retryable).toBeUndefined()
+    expect(result.error.message).toContain('Downloaded and validated 4 bytes')
+  })
+
+  test('download without --out writes to ./<pieceCid> in the cwd', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'foc-cli-test-'))
+    tempDirs.push(dir)
+    const prevCwd = process.cwd()
+    process.chdir(dir)
+    try {
+      const result = await downloadCommand.run(
+        commandContext({ args: { pieceCid: 'baga-piece' } })
+      )
+      // process.cwd() rather than dir: macOS tmpdir is a /var -> /private/var
+      // symlink and cwd reports the realpath.
+      expect(result.path).toBe(path.join(process.cwd(), 'baga-piece'))
+      const written = await readFile(result.path)
+      expect([...written]).toEqual([1, 2, 3, 4])
+    } finally {
+      process.chdir(prevCwd)
+    }
+  })
+
+  test('download refuses to overwrite an existing file without --force', async () => {
+    const existing = await tempFile('already-there.bin', 'precious')
+
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: existing },
+      })
+    )
+
+    expect(result.error.code).toBe('FILE_EXISTS')
+    expect(result.cta.commands[0].options).toMatchObject({ force: true })
+    // The original bytes must be untouched.
+    expect((await readFile(existing)).toString()).toBe('precious')
+  })
+
+  test('download --force overwrites the existing file', async () => {
+    const existing = await tempFile('already-there.bin', 'precious')
+
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: existing, force: true },
+      })
+    )
+
+    expect(result.verified).toBe(true)
+    expect([...(await readFile(existing))]).toEqual([1, 2, 3, 4])
+  })
+})
+
+describe('docs command hardening round 2', () => {
+  test('deep search walks sitemap-index.xml shards when available', async () => {
+    const INDEX_XML = `<sitemapindex><sitemap><loc>https://docs.filecoin.cloud/sitemap-0.xml</loc></sitemap></sitemapindex>`
+    const SHARD_XML = `<urlset><url><loc>https://docs.filecoin.cloud/reference/foo/getpdpdataset/toc/</loc></url></urlset>`
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response('- [X](https://docs.filecoin.cloud/x.md): x', {
+            status: 200,
+          })
+      ) // llms.txt
+      .mockImplementationOnce(
+        async () => new Response(INDEX_XML, { status: 200 })
+      ) // sitemap-index.xml
+      .mockImplementationOnce(
+        async () => new Response(SHARD_XML, { status: 200 })
+      ) // shard
+      .mockImplementationOnce(
+        async () => new Response('# page', { status: 200 })
+      ) // auto-fetch
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'getpdpdataset', deep: true } })
+    )
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://docs.filecoin.cloud/sitemap-index.xml',
+      expect.anything()
+    )
+    expect(result.source).toBe(
+      'https://docs.filecoin.cloud/reference/foo/getpdpdataset/toc.md'
+    )
+  })
+
+  test('auto-fallback fails loudly when the sitemap cannot be fetched instead of reporting no matches', async () => {
+    fetchMock
+      .mockImplementationOnce(
+        async () =>
+          new Response('- [X](https://docs.filecoin.cloud/x.md): x', {
+            status: 200,
+          })
+      ) // llms.txt — no match
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-index
+      .mockImplementationOnce(async () => new Response(null, { status: 404 })) // sitemap-0
+
+    const result = await docsCommand.run(
+      commandContext({ options: { prompt: 'getpdpdataset' } })
+    )
+
+    expect(result.error.code).toBe('FETCH_FAILED')
+    expect(result.error.retryable).toBe(true)
+  })
+
+  test('docs --url refuses to follow redirects (3xx surfaces as FETCH_FAILED)', async () => {
+    fetchMock.mockImplementationOnce(
+      async () =>
+        new Response(null, {
+          status: 301,
+          headers: { location: 'https://evil.example.com/x' },
+        })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'developer-guides/synapse.md' } })
+    )
+
+    expect(result.error.code).toBe('FETCH_FAILED')
+  })
+
+  test('HTML body-sniff fires even without an html content-type', async () => {
+    fetchMock.mockImplementationOnce(
+      async () =>
+        new Response('<div>rendered page soup</div>', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        })
+    )
+    const result = await docsCommand.run(
+      commandContext({ options: { url: 'llms.txt' } })
+    )
+
+    expect(result.error.code).toBe('HTML_RESPONSE')
+  })
+})
+
+describe('command output schema discovery', () => {
+  // wallet init shipped without an output declaration, leaving --schema and
+  // MCP get_tool_details blind to its result contract. Walk the source tree
+  // so the next command added without a schema fails here, not in the field.
+  test('every executable command declares an output schema', async () => {
+    const commandsDir = path.join(import.meta.dir, '../src/commands')
+    const files = (await readdir(commandsDir, { recursive: true })).filter(
+      (file) => file.endsWith('.ts') && !file.endsWith('index.ts')
+    )
+    expect(files.length).toBeGreaterThan(0)
+
+    const missing: string[] = []
+    for (const file of files) {
+      const module = await import(path.join(commandsDir, file))
+      for (const [exportName, command] of Object.entries(module)) {
+        const isCommand =
+          command &&
+          typeof command === 'object' &&
+          typeof (command as any).run === 'function'
+        if (isCommand && !(command as any).output) {
+          missing.push(`${file}:${exportName}`)
+        }
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  test('wallet init output schema accepts both result envelopes', () => {
+    const schema = (initCommand as any).output
+    expect(
+      schema.safeParse({ status: 'configured', method: 'auto', source: 'x' })
+        .success
+    ).toBe(true)
+    expect(
+      schema.safeParse({ status: 'already_configured', configPath: '/c' })
+        .success
+    ).toBe(true)
+  })
+})
+
+describe('cta chain propagation', () => {
+  // A command run with --chain 314 must never hand an agent a follow-up
+  // command that silently defaults back to Calibration. Every chain-aware
+  // CTA is stamped via chainCta(); this sweep runs the CTA-emitting commands
+  // on mainnet and rejects any suggested command that lost the chain.
+  function expectCtaChain(result: any, chain: number) {
+    expect(result.cta).toBeDefined()
+    for (const cmd of result.cta.commands) {
+      expect(cmd.options?.chain).toBe(chain)
+    }
+  }
+
+  test('dataset list CTA carries chain 314', async () => {
+    const result = await datasetListCommand.run(
+      commandContext({ options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('dataset details CTA (incl. pagination entries) carries chain 314', async () => {
+    const result = await datasetDetailsCommand.run(
+      commandContext({ options: { chain: 314, dataSetId: 42 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('dataset create CTAs carry chain 314', async () => {
+    const result = await datasetCreateCommand.run(
+      commandContext({ args: { providerId: 77 }, options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('dataset terminate CTA carries chain 314', async () => {
+    const result = await datasetTerminateCommand.run(
+      commandContext({ args: { dataSetId: 42 }, options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('piece list CTA carries chain 314', async () => {
+    const result = await pieceListCommand.run(
+      commandContext({ args: { dataSetId: 42 }, options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('piece remove CTA carries chain 314', async () => {
+    const result = await pieceRemoveCommand.run(
+      commandContext({
+        args: { dataSetId: 42, pieceId: 7 },
+        options: { chain: 314 },
+      })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('provider list CTA carries chain 314', async () => {
+    const result = await providerListCommand.run(
+      commandContext({ options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('wallet deposit CTA carries chain 314', async () => {
+    const result = await depositCommand.run(
+      commandContext({ args: { amount: '1' }, options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('wallet fund CTA carries the active chain', async () => {
+    const result = await fundCommand.run(commandContext())
+    expectCtaChain(result, 314159)
+  })
+
+  test('wallet balance faucet CTA carries the calibration chain explicitly', async () => {
+    synapsePayments.walletBalance.mockImplementationOnce(async () => {
+      throw new Error('actor not found')
+    })
+    const result = await balanceCommand.run(commandContext())
+    expectCtaChain(result, 314159)
+  })
+
+  test('download success and FILE_EXISTS CTAs carry chain 314', async () => {
+    const marker = await tempFile('marker.txt', '')
+    const freshPath = path.join(path.dirname(marker), 'dl.bin')
+    const ok = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { chain: 314, out: freshPath },
+      })
+    )
+    expectCtaChain(ok, 314)
+
+    const exists = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { chain: 314, out: freshPath },
+      })
+    )
+    expect(exists.error.code).toBe('FILE_EXISTS')
+    expectCtaChain(exists, 314)
   })
 })

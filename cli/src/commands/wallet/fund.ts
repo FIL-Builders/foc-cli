@@ -1,11 +1,17 @@
 import { claimTokens, formatBalance } from '@filoz/synapse-core/utils'
 import { z } from 'incur'
 import { waitForTransactionReceipt } from 'viem/actions'
-import { OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
 export const fundCommand = {
   description: 'Request testnet FIL and USDFC from faucet (testnet only)',
+  mcp: {
+    annotations: {
+      title: 'Claim testnet faucet tokens',
+      destructiveHint: false,
+    },
+  },
   options: z.object({
     chain: z
       .number()
@@ -13,7 +19,7 @@ export const fundCommand = {
       .describe('Chain ID. 314159 = Calibration, 314 = Mainnet'),
   }),
   alias: { chain: 'c' },
-  output: z.object({
+  output: commandOutput({
     fil: z.string(),
     usdfc: z.string(),
   }),
@@ -41,7 +47,7 @@ export const fundCommand = {
       }
 
       return out.done(result, {
-        cta: {
+        cta: chainCta(c.options.chain, {
           description: 'Next steps:',
           commands: [
             {
@@ -51,7 +57,7 @@ export const fundCommand = {
             },
             { command: 'wallet balance', description: 'Check balances' },
           ],
-        },
+        }),
       })
     } catch (error) {
       return out.fail('FUND_FAILED', (error as Error).message)
