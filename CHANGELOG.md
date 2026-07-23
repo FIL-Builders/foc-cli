@@ -38,6 +38,8 @@ Agent-hardening release ([#30]), driven by a 609-invocation live smoke campaign 
 - Both upload paths accepted directories, FIFOs, and devices at preflight (readability and size only), so the funding transaction could execute before streaming failed or blocked; non-regular files are now rejected (`NOT_A_FILE` / `FILE_READ_FAILED`) before provider selection. ([#30])
 - `wallet balance` actor-not-found guidance suggested the Calibration-only faucet on every chain; the `wallet fund` CTA is now testnet-only and mainnet gets prose directing funds to the address. ([#30])
 - `wallet balance` fresh-address humanization also recognizes the current Glif RPC wording (`failed to apply on state with gas`) — live-observed 2026-07-23, the older `actor not found` match alone had let the raw multicall dump return. ([#27], [#30])
+- `dataset create`'s success CTA recommended `piece upload`, a command that no longer exists; it now suggests `upload` and `dataset details`. ([#30])
+- `wallet summary` rendered the funding runway as the same duration in five concatenated units (`17468h 727d 103w 25m 2y`); it now picks one unit (`~2y`). ([#30])
 - `wallet costs` failed with `No endorsed provider available` and undercounted datasets sharing a provider (live check: 0.1058 → correct 0.1322 USDFC/month for 1 GiB). ([#26])
 - `wallet init --keystore` accepted a directory or arbitrary JSON and reported success; it now validates the path is a regular file (a FIFO could block the process at the synchronous read) containing an encrypted keystore with a `crypto` object (`KEYSTORE_INVALID`). ([#27], [#30])
 - Keystore failures decode themselves: missing `cast` (install Foundry), `Mac Mismatch` (wrong password), no terminal (keystore mode cannot run under MCP/CI). ([#27])
