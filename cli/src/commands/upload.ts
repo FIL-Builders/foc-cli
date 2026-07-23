@@ -142,10 +142,9 @@ export const uploadCommand = {
       // Open the stream only now — immediately before it is consumed — so a
       // file that vanished or changed since stat surfaces here, not earlier.
       const fileStream = Readable.toWeb(createReadStream(absolutePath))
-      const result = await synapse.storage.upload(fileStream, {
-        contexts,
-        withCDN: c.options.withCDN,
-      })
+      // CDN preference is already baked into the contexts; the SDK rejects
+      // upload({ contexts, withCDN }) outright, so pass contexts alone.
+      const result = await synapse.storage.upload(fileStream, { contexts })
 
       const cidStr = result.pieceCid.toString()
       const copyResults = result.copies.map((copy) => ({

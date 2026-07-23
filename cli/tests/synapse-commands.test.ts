@@ -189,9 +189,11 @@ describe('top-level upload commands', () => {
       dataSize: 4n,
     })
     expect(execute).toHaveBeenCalled()
+    // The SDK contract: upload() rejects any other option (withCDN,
+    // providerIds, dataSetIds) once contexts are supplied — CDN preference
+    // must ride in via createContexts only.
     expect(synapseStorage.upload).toHaveBeenCalledWith(expect.anything(), {
       contexts,
-      withCDN: true,
     })
     expect(result.status).toBe('uploaded')
     expect(result.result).toEqual({

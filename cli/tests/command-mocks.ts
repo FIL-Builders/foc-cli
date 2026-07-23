@@ -388,12 +388,27 @@ export function resetCommandMocks() {
       needsFwssMaxApproval: false,
     },
   }))
-  synapseStorage.upload.mockImplementation(async () => ({
-    pieceCid: cid('baga-upload'),
-    size: 4,
-    copies: [],
-    failedAttempts: [],
-  }))
+  synapseStorage.upload.mockImplementation(async (_data: any, options: any) => {
+    // Mirror the pinned SDK's _resolveUploadContexts guard: contexts are
+    // exclusive with the options they were built from. Keeping the guard in
+    // the mock makes every upload test a regression against that contract.
+    if (options?.contexts != null) {
+      const invalid = ['providerIds', 'dataSetIds', 'withCDN'].filter(
+        (key) => options[key] !== undefined
+      )
+      if (invalid.length > 0) {
+        throw new Error(
+          `Cannot specify both 'contexts' and other options: ${invalid.join(', ')}`
+        )
+      }
+    }
+    return {
+      pieceCid: cid('baga-upload'),
+      size: 4,
+      copies: [],
+      failedAttempts: [],
+    }
+  })
   synapseStorage.download.mockImplementation(
     async () => new Uint8Array([1, 2, 3, 4])
   )
