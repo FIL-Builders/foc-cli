@@ -10,7 +10,10 @@ Agent-hardening release ([#30]), driven by a 609-invocation live smoke campaign 
 
 ### Added
 
-- `download <pieceCid>` — retrieval as verification: the SDK validates received bytes against the piece CID, so a successful download is itself the proof of storage. Distinct error codes separate what retrying can fix (`DOWNLOAD_FAILED`) from what it cannot (`INTEGRITY_MISMATCH`, `PROVIDER_NOT_FOUND`, `WRITE_FAILED`). ([#7])
+- `download <pieceCid>` — retrieval as verification: the SDK validates received bytes against the piece CID, so a successful download is itself the proof of storage. Distinct error codes separate what retrying can fix (`DOWNLOAD_FAILED`) from what it cannot (`INTEGRITY_MISMATCH`, `PROVIDER_NOT_FOUND`, `WRITE_FAILED`, `FILE_EXISTS`). ([#7])
+- `download --force` — downloads no longer overwrite an existing output file: without the flag, an existing path fails with `FILE_EXISTS` and a ready-to-run overwrite CTA, and the MCP annotation declares `destructiveHint: true`. ([#30])
+- `wallet costs --copies` / `--withCDN` — the estimate prices the copies the next upload will create (default 2, like `upload`); an empty wallet is priced as new datasets without touching provider selection. ([#30])
+- `wallet init` output schema — it was the only executable command without one, hiding its result contract from `--schema` and MCP `get_tool_details`; a discovery test now walks `src/commands` so the next schema-less command fails CI. ([#30])
 - `docs --deep` — searches the full ~1,800-page site sitemap (SDK API reference, changelogs), automatically invoked when the curated index has no matches. ([#25])
 - MCP tool annotations on every command — human titles, `readOnlyHint` on reads, `destructiveHint` on `wallet init` / `dataset terminate` / `piece remove` — plus descriptions that state consequences (uploads commit USDFC onchain, terminate is irreversible). ([#28])
 - Fetch-all CTAs on paginated lists (`piece list`, `dataset details`) alongside next-page.
@@ -21,17 +24,21 @@ Agent-hardening release ([#30]), driven by a 609-invocation live smoke campaign 
 ### Changed
 
 - Uploads stream to providers (`upload`, `multi-upload`) — peak memory stays flat at any file size; only `stat` sizes are read up front. ([#24])
-- `wallet costs` prices each existing dataset individually (one storage context per dataset) and no longer depends on endorsed-provider selection. ([#26])
+- `wallet costs` no longer depends on endorsed-provider selection and prices the upload it is quoting — `--copies` storage contexts (default 2), reusing active datasets before pricing new ones — instead of every active dataset, which made the quote scale with historical dataset count. ([#26], [#30])
+- `wallet init` explicit methods (`--auto`, `--keystore`, `--privateKey`) now replace the configured wallet and clear the alternate credential; `--auto` previously reported `already_configured` behind an existing key, and a configured keystore silently outranked a newly set key. ([#30])
 - `--schema` now tells the truth: declared output schemas include the `processLog` step trail and `cta` block that real agent-mode responses carry. ([#28])
 - Both agent skills open with a self-discovery rule (run `<cmd> -h` and `<cmd> --schema --format json` before first use) and document flag syntax truthfully: camelCase and kebab-case spellings both parse, and boolean flags are presence-only switches (`--flag=false` is the explicit form). ([#1], [#3], [#5])
-- Keystore mode documented as interactive-CLI-only: the password prompt reads the terminal at use time, so MCP and CI must use a private-key wallet.
+- Keystore mode documented as interactive-CLI-only — and now enforced: agent/MCP mode rejects `--keystore` (`KEYSTORE_INTERACTIVE_ONLY`) and its init guidance no longer offers it, since the password prompt reads the terminal at use time. ([#30])
 - README rewritten against the verified current surface — one-table command map, quick start ending in a download round-trip. ([#29])
 - Dependencies: `@filoz/synapse-sdk` 1.1.0, `incur` 0.4.19 (fixes the doubled group prefix in `--llms` output). ([#23])
 
 ### Fixed
 
+- `upload --withCDN` always failed against the pinned SDK — `contexts` and `withCDN` are mutually exclusive upload options — and only after the funding transaction had run. CDN preference now rides in via context creation alone. ([#30])
+- Both upload paths accepted directories, FIFOs, and devices at preflight (readability and size only), so the funding transaction could execute before streaming failed or blocked; non-regular files are now rejected (`NOT_A_FILE` / `FILE_READ_FAILED`) before provider selection. ([#30])
+- `wallet balance` actor-not-found guidance suggested the Calibration-only faucet on every chain; the `wallet fund` CTA is now testnet-only and mainnet gets prose directing funds to the address. ([#30])
 - `wallet costs` failed with `No endorsed provider available` and undercounted datasets sharing a provider (live check: 0.1058 → correct 0.1322 USDFC/month for 1 GiB). ([#26])
-- `wallet init --keystore` accepted a directory or arbitrary JSON and reported success; it now validates the path is an encrypted keystore file (`KEYSTORE_INVALID`). ([#27])
+- `wallet init --keystore` accepted a directory or arbitrary JSON and reported success; it now validates the path is a regular file (a FIFO could block the process at the synchronous read) containing an encrypted keystore with a `crypto` object (`KEYSTORE_INVALID`). ([#27], [#30])
 - Keystore failures decode themselves: missing `cast` (install Foundry), `Mac Mismatch` (wrong password), no terminal (keystore mode cannot run under MCP/CI). ([#27])
 - `docs` auto-fetch could return raw HTML for pages without a markdown mirror; both fetch paths now share the HTML backstop.
 - Interactive spinner no longer blanks step labels or leaks orphan glyphs when info/success messages interleave with steps.
@@ -43,6 +50,7 @@ Agent-hardening release ([#30]), driven by a 609-invocation live smoke campaign 
 ### Security
 
 - `docs --url` is restricted to `docs.filecoin.cloud` (full URL or bare docs path), rejects traversal, and refuses redirects so the host allowlist holds end-to-end. ([#25])
+- The same allowlist now also gates URLs parsed out of fetched content — `llms.txt` index entries, sitemap shards, and sitemap pages — so a planted external link can never be auto-fetched. ([#30])
 - Keystore decryption invokes `cast` with an argument array — the keystore path is never interpolated into a shell command. ([#27])
 
 ## [0.1.1] — 2026-06-16

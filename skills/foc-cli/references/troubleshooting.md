@@ -15,9 +15,10 @@ How foc-cli reports failures: every command returns a structured error envelope 
 
 | Code | Command(s) | Likely causes | Retry? |
 |------|-----------|---------------|--------|
-| `INIT_METHOD_REQUIRED` | `wallet init` (agent mode) | No init method given non-interactively | With `--auto`/`--keystore`/`--privateKey` |
+| `INIT_METHOD_REQUIRED` | `wallet init` (agent mode) | No init method given non-interactively | With `--auto` or `--privateKey` (keystore mode is interactive-only) |
+| `KEYSTORE_INTERACTIVE_ONLY` | `wallet init --keystore` (agent mode) | Keystore mode cannot work under MCP/automation — `cast` prompts for the password on the terminal at use time | No — use `--auto` or `--privateKey` |
 | `KEYSTORE_NOT_FOUND` | `wallet init --keystore` | Wrong path. Note: `cast wallet new` names files with a random UUID, not the name you expect (see keystore-setup.md) | No — fix the path |
-| `KEYSTORE_INVALID` | `wallet init --keystore` | Path is a directory, or the file is not an encrypted keystore (no `crypto` field / not JSON). Pass the keystore *file* itself | No — fix the path or create a keystore (keystore-setup.md) |
+| `KEYSTORE_INVALID` | `wallet init --keystore` | Path is a directory or other non-regular file, or the file is not an encrypted keystore (no `crypto` object / not JSON). Pass the keystore *file* itself | No — fix the path or create a keystore (keystore-setup.md) |
 | `INVALID_KEY` | `wallet init --privateKey` | Not 0x-prefixed 64-char hex | No — fix the key format |
 | `ADDRESS_NOT_ON_CHAIN` | `wallet balance` | Brand-new address with no onchain history yet — every balance is zero | No — fund the address first (`wallet fund` on testnet) |
 | `BALANCE_FETCH_FAILED` | `wallet balance` | RPC hiccup; no wallet configured | Once, if message looks network-y |
@@ -26,13 +27,15 @@ How foc-cli reports failures: every command returns a structured error envelope 
 | `WITHDRAW_FAILED` | `wallet withdraw` | Commonly: amount exceeds *available* (unlocked) funds — active payment rails lock part of the deposit (`wallet summary` shows it). Also gas or RPC failures — read the message | Only after checking `wallet summary` |
 | `COSTS_FAILED`, `SUMMARY_FAILED` | `wallet costs` / `summary` | RPC hiccup; no wallet | Once |
 | `UPLOAD_FAILED` | `upload`, `multi-upload` | Catch-all: see message patterns below — funding, provider health, file, or size problems | Depends on message |
-| `FILE_READ_FAILED` | `multi-upload` | One or more paths unreadable (the command refuses partial batches) | No — fix the paths |
+| `NOT_A_FILE` | `upload` | Path is a directory or other non-regular file (checked before any onchain spend) | No — pass a regular file |
+| `FILE_READ_FAILED` | `multi-upload` | One or more paths unreadable or not regular files (the command refuses partial batches) | No — fix the paths |
 | `PRIMARY_STORE_FAILED` | `multi-upload` | Primary provider rejected/failed the piece POST | Yes — provider-side, often transient |
 | `PULL_TO_SECONDARY_FAILED` | `multi-upload` | A secondary provider could not pull the piece from the primary | Yes — often transient |
 | `COMMIT_TO_CONTEXTS_FAILED` | `multi-upload` | Onchain add-pieces transaction failed (gas, nonce, RPC) | Once — then check the explorer link |
 | `INVALID_PIECE_CID` | `download` | Malformed CID (not a `baga…` piece CID) | No — fix the CID |
 | `INTEGRITY_MISMATCH` | `download` | Bytes arrived but do NOT hash to the expected piece CID — the source served wrong/corrupt data | **No** — retrying the same source cannot help; follow the CTA (toggle `--withCDN` or pick a provider) and treat repeated mismatches as a provider problem worth reporting |
 | `PROVIDER_NOT_FOUND` | `download --providerAddress` | The given provider address is not registered | No — pick from `provider list` |
+| `FILE_EXISTS` | `download` | Output path already exists — downloads never overwrite by default | No — pass `--force` to overwrite, or a different `--out` |
 | `WRITE_FAILED` | `download` | Piece downloaded and validated, but the local write failed (`--out` directory missing, permissions, disk full) | No — fix the output path; the retrieval itself succeeded |
 | `DOWNLOAD_FAILED` | `download` | Transient retrieval failure: provider down, CDN miss, piece very recently uploaded, or piece lives on the other chain | Yes (flagged) — also re-check `--chain` |
 | `DATASET_NOT_FOUND`, `NOT_FOUND` | `dataset details`, `piece list/remove` | Wrong id — or right id, wrong `--chain` | No — verify with `dataset list` on both chains |
