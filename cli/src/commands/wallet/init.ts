@@ -46,7 +46,7 @@ function validateKeystoreFile(
 
 export const initCommand = {
   description:
-    'Initialize wallet with a private key or keystore. Replaces any previously configured wallet. Keystore mode prompts for its password on the terminal at use time, so it only works in interactive CLI sessions — for MCP or automation, configure a private key (--auto or --privateKey).',
+    'Initialize wallet with a private key or keystore. An explicit method (--auto, --keystore, --privateKey) replaces any previously configured wallet; without one, an existing wallet is kept. Keystore mode prompts for its password on the terminal at use time, so it only works in interactive CLI sessions — agent mode rejects --keystore; use --auto or --privateKey.',
   mcp: {
     annotations: {
       title: 'Configure wallet (replaces existing config)',
@@ -58,7 +58,9 @@ export const initCommand = {
     keystore: z
       .string()
       .optional()
-      .describe('Path to a Foundry keystore file (requires foundry)'),
+      .describe(
+        'Path to a Foundry keystore file (requires foundry; interactive CLI only — rejected in agent/MCP mode)'
+      ),
     privateKey: z.string().optional().describe('Private key (0x-prefixed hex)'),
     source: z
       .string()
@@ -93,8 +95,35 @@ export const initCommand = {
     }
 
     if (c.options.keystore) {
-      // Expand ~ ourselves: MCP/agent invocations have no shell to do it, so
-      // '~/.foundry/keystores/foc' would otherwise "not exist".
+      // A keystore is unusable from MCP/automation: cast prompts for its
+      // password on the terminal at use time, so an agent that configures one
+      // locks itself out of every subsequent command. Reject at init, where
+      // the mistake is cheap to correct.
+      if (agent) {
+        return out.fail(
+          'KEYSTORE_INTERACTIVE_ONLY',
+          'Keystore mode prompts for its password on the terminal at use time, so it cannot work from MCP or automation. Configure a private-key wallet instead.',
+          {
+            cta: {
+              description: 'Choose one:',
+              commands: [
+                {
+                  command: 'wallet init',
+                  options: { auto: true },
+                  description: 'Generate random key',
+                },
+                {
+                  command: 'wallet init',
+                  options: { privateKey: '0x...' },
+                  description: 'Set key directly',
+                },
+              ],
+            },
+          }
+        )
+      }
+      // Expand ~ ourselves so '~/.foundry/keystores/foc' works even when the
+      // shell didn't get a chance to (e.g. quoted paths).
       const keystorePath = expandHome(c.options.keystore)
       const problem = validateKeystoreFile(keystorePath)
       if (problem) return out.fail(problem.code, problem.message)
@@ -123,6 +152,26 @@ export const initCommand = {
       return out.done({ status: 'configured', method: 'manual' })
     }
 
+    // Explicit methods run before the existing-config shortcut: --auto must
+    // replace whatever is configured, exactly as the description promises.
+    if (c.options.auto) {
+      const privateKey = generatePrivateKey()
+      config.set('privateKey', privateKey)
+      // Clear the alternate credential too — privateKeyFromConfig() prefers a
+      // configured keystore, which would silently win over the new key.
+      config.delete('keystore')
+      if (!agent) {
+        p.intro('Initializing Synapse CLI...')
+        p.log.success(`Private key: ${privateKey}`)
+        p.outro("You're all set!")
+      }
+      return out.done({
+        status: 'configured',
+        method: 'auto',
+        source: config.get('source') ?? 'foc-cli',
+      })
+    }
+
     const existingKey = config.get('privateKey')
     if (existingKey) {
       if (!agent) {
@@ -137,26 +186,12 @@ export const initCommand = {
       })
     }
 
-    if (c.options.auto) {
-      const privateKey = generatePrivateKey()
-      config.set('privateKey', privateKey)
-      if (!agent) {
-        p.intro('Initializing Synapse CLI...')
-        p.log.success(`Private key: ${privateKey}`)
-        p.outro("You're all set!")
-      }
-      return out.done({
-        status: 'configured',
-        method: 'auto',
-        source: config.get('source') ?? 'foc-cli',
-      })
-    }
-
-    // Agent mode: require explicit options
+    // Agent mode: require explicit options. Keystore is deliberately absent
+    // from this guidance — it cannot work from MCP/automation.
     if (agent) {
       return out.fail(
         'INIT_METHOD_REQUIRED',
-        'Use --auto, --keystore, or --privateKey for non-interactive init',
+        'Use --auto or --privateKey for non-interactive init',
         {
           retryable: true,
           cta: {
@@ -166,11 +201,6 @@ export const initCommand = {
                 command: 'wallet init',
                 options: { auto: true },
                 description: 'Generate random key',
-              },
-              {
-                command: 'wallet init',
-                options: { keystore: '<path>' },
-                description: 'Use Foundry keystore',
               },
               {
                 command: 'wallet init',

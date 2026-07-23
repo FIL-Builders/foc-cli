@@ -73,12 +73,14 @@ const tempDirs: string[] = []
 function commandContext({
   args = {},
   options = {},
+  agent = true,
 }: {
   args?: Record<string, any>
   options?: Record<string, any>
+  agent?: boolean
 } = {}) {
   return {
-    agent: true,
+    agent,
     args,
     options: {
       chain: 314159,
@@ -487,7 +489,7 @@ describe('wallet commands', () => {
     tempDirs.push(dir)
 
     const result = await initCommand.run(
-      commandContext({ options: { keystore: dir } })
+      commandContext({ options: { keystore: dir }, agent: false })
     )
 
     expect(result.error.code).toBe('KEYSTORE_INVALID')
@@ -502,7 +504,7 @@ describe('wallet commands', () => {
     const filePath = await tempFile('not-a-keystore.json', '{"hello":"world"}')
 
     const result = await initCommand.run(
-      commandContext({ options: { keystore: filePath } })
+      commandContext({ options: { keystore: filePath }, agent: false })
     )
 
     expect(result.error.code).toBe('KEYSTORE_INVALID')
@@ -511,7 +513,10 @@ describe('wallet commands', () => {
 
   test('wallet init --keystore reports a missing path as KEYSTORE_NOT_FOUND', async () => {
     const result = await initCommand.run(
-      commandContext({ options: { keystore: '/nonexistent-dir-8f2k/ks.json' } })
+      commandContext({
+        options: { keystore: '/nonexistent-dir-8f2k/ks.json' },
+        agent: false,
+      })
     )
 
     expect(result.error.code).toBe('KEYSTORE_NOT_FOUND')
@@ -524,7 +529,7 @@ describe('wallet commands', () => {
     )
 
     const result = await initCommand.run(
-      commandContext({ options: { keystore: filePath } })
+      commandContext({ options: { keystore: filePath }, agent: false })
     )
 
     expect(configStore.set).toHaveBeenCalledWith('keystore', filePath)
@@ -534,6 +539,65 @@ describe('wallet commands', () => {
       method: 'keystore',
       path: filePath,
     })
+  })
+
+  test('wallet init --keystore is rejected in agent mode before touching config', async () => {
+    const filePath = await tempFile(
+      'keystore.json',
+      JSON.stringify({ crypto: { cipher: 'aes-128-ctr' }, id: 'x', version: 3 })
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: filePath } })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INTERACTIVE_ONLY')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keystore',
+      expect.anything()
+    )
+  })
+
+  // Explicit methods must replace the configured wallet — the old ordering
+  // returned already_configured and kept the previous credential.
+  test('wallet init --auto replaces an existing private key', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'privateKey' ? '0xold' : undefined
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { auto: true } })
+    )
+
+    expect(result.status).toBe('configured')
+    expect(result.method).toBe('auto')
+    expect(configStore.set).toHaveBeenCalledWith(
+      'privateKey',
+      expect.stringMatching(/^0x[a-fA-F0-9]{64}$/)
+    )
+  })
+
+  test('wallet init --auto clears a configured keystore so the new key wins', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'keystore' ? '/home/user/.foundry/keystores/foc' : undefined
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { auto: true } })
+    )
+
+    expect(result.status).toBe('configured')
+    expect(configStore.delete).toHaveBeenCalledWith('keystore')
+  })
+
+  test('wallet init agent guidance no longer offers the interactive-only keystore method', async () => {
+    const result = await initCommand.run(commandContext())
+
+    expect(result.error.code).toBe('INIT_METHOD_REQUIRED')
+    const offered = result.cta.commands.map((cmd: any) => cmd.options)
+    expect(offered).not.toContainEqual(
+      expect.objectContaining({ keystore: expect.anything() })
+    )
   })
 
   test('wallet deposit parses the amount, deposits with permit, and waits for the transaction', async () => {

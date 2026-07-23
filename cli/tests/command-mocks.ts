@@ -269,6 +269,15 @@ export const configStore = {
 
 mock.module('../src/config.ts', () => ({ default: configStore }))
 
+// The real isAgent() ORs in !process.stdout.isTTY, which is always true under
+// the test runner — every command context would count as agent mode. Pin it
+// to the context flag so tests can exercise both modes deliberately.
+const realUtils = await import('../src/utils.ts')
+mock.module('../src/utils.ts', () => ({
+  ...realUtils,
+  isAgent: (c: { agent?: boolean }) => c.agent === true,
+}))
+
 mock.module('../src/client.ts', () => ({
   privateKeyClient,
   publicClient,
