@@ -98,14 +98,16 @@ export const createCommand = {
             description: 'Next steps:',
             commands: [
               {
-                command: 'piece upload',
-                args: {
-                  path: '<file>',
-                  dataSetId: dataset.dataSetId.toString(),
-                },
-                description: 'Upload a piece',
+                command: 'upload',
+                args: { path: '<file>' },
+                description:
+                  'Upload a file — provider selection reuses this dataset when its provider is chosen',
               },
-              { command: 'dataset list', description: 'List all datasets' },
+              {
+                command: 'dataset details',
+                options: { dataSetId: dataset.dataSetId.toString() },
+                description: 'Inspect the new dataset',
+              },
             ],
           },
         }
