@@ -3,7 +3,7 @@ import * as p from '@clack/prompts'
 import { z } from 'incur'
 import { generatePrivateKey } from 'viem/accounts'
 import config from '../../config.ts'
-import { OutputContext } from '../../output.ts'
+import { commandOutput, OutputContext } from '../../output.ts'
 import { expandHome, isAgent } from '../../utils.ts'
 
 /**
@@ -84,6 +84,29 @@ export const initCommand = {
       ),
   }),
   alias: { auto: 'a' },
+  output: commandOutput({
+    status: z
+      .enum(['configured', 'already_configured'])
+      .describe(
+        'configured: a wallet was (re)configured this run. already_configured: an existing wallet was kept because no explicit method was passed.'
+      ),
+    method: z
+      .enum(['auto', 'keystore', 'manual'])
+      .optional()
+      .describe('How the wallet was configured (absent on already_configured)'),
+    path: z
+      .string()
+      .optional()
+      .describe('Configured keystore path (method: keystore only)'),
+    configPath: z
+      .string()
+      .optional()
+      .describe('Config file location (already_configured only)'),
+    source: z
+      .string()
+      .optional()
+      .describe('Attribution tag reported to Synapse/Warm Storage'),
+  }),
   examples: [
     { description: 'Interactive key entry' },
     { options: { auto: true }, description: 'Generate random key' },

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -1667,5 +1667,45 @@ describe('docs command hardening round 2', () => {
     )
 
     expect(result.error.code).toBe('HTML_RESPONSE')
+  })
+})
+
+describe('command output schema discovery', () => {
+  // wallet init shipped without an output declaration, leaving --schema and
+  // MCP get_tool_details blind to its result contract. Walk the source tree
+  // so the next command added without a schema fails here, not in the field.
+  test('every executable command declares an output schema', async () => {
+    const commandsDir = path.join(import.meta.dir, '../src/commands')
+    const files = (await readdir(commandsDir, { recursive: true })).filter(
+      (file) => file.endsWith('.ts') && !file.endsWith('index.ts')
+    )
+    expect(files.length).toBeGreaterThan(0)
+
+    const missing: string[] = []
+    for (const file of files) {
+      const module = await import(path.join(commandsDir, file))
+      for (const [exportName, command] of Object.entries(module)) {
+        const isCommand =
+          command &&
+          typeof command === 'object' &&
+          typeof (command as any).run === 'function'
+        if (isCommand && !(command as any).output) {
+          missing.push(`${file}:${exportName}`)
+        }
+      }
+    }
+    expect(missing).toEqual([])
+  })
+
+  test('wallet init output schema accepts both result envelopes', () => {
+    const schema = (initCommand as any).output
+    expect(
+      schema.safeParse({ status: 'configured', method: 'auto', source: 'x' })
+        .success
+    ).toBe(true)
+    expect(
+      schema.safeParse({ status: 'already_configured', configPath: '/c' })
+        .success
+    ).toBe(true)
   })
 })
