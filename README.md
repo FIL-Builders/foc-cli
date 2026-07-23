@@ -13,7 +13,6 @@
 <p align="center">
   <a href="https://docs.filecoin.cloud">Docs</a> &nbsp;&bull;&nbsp;
   <a href="https://skills.sh">Skills.sh</a> &nbsp;&bull;&nbsp;
-  <a href="https://clawhub.ai">ClawHub</a> &nbsp;&bull;&nbsp;
   <a href="https://github.com/FIL-Builders/foc-cli">GitHub</a>
 </p>
 
@@ -39,7 +38,6 @@ A successful `download` is cryptographic proof your file is stored and intact â€
 ```bash
 npm install -g foc-cli                    # CLI
 npx skills add FIL-Builders/foc-cli       # Agent skills via skills.sh (Claude Code, Cursor, Copilot, 20+ tools)
-clawhub install foc-cli && clawhub install foc-docs   # Agent skills via ClawHub (OpenClaw)
 npx foc-cli mcp add                       # MCP server (auto-detects your agent)
 ```
 
