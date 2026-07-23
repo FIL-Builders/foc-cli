@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-Agent-hardening release ([#30]), driven by a 609-invocation live smoke campaign on Calibration and a keystore field test. Contains one breaking change, so the next release should be **0.2.0**.
+Nothing yet.
+
+## [0.2.0] — 2026-07-23
+
+Agent-hardening release ([#30]), driven by a 609-invocation live smoke campaign on Calibration and a keystore field test. Contains one breaking change (hence the minor bump).
 
 ### Added
 
@@ -102,7 +106,8 @@ Initial public release.
 - MCP server mode and the two agent skills (`foc-cli`, `foc-docs`).
 - MCP client compatibility fixes.
 
-[Unreleased]: https://github.com/FIL-Builders/foc-cli/compare/main...agent-hardening
+[Unreleased]: https://github.com/FIL-Builders/foc-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/FIL-Builders/foc-cli/releases/tag/v0.2.0
 [0.1.1]: https://www.npmjs.com/package/foc-cli/v/0.1.1
 [0.1.0]: https://www.npmjs.com/package/foc-cli/v/0.1.0
 [0.0.4]: https://www.npmjs.com/package/foc-cli/v/0.0.4
