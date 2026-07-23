@@ -46,20 +46,31 @@ export const balanceCommand = {
       // init — the raw viem multicall dump ("actor not found") must not be
       // their first impression.
       if (message.includes('actor not found')) {
+        // The faucet CTA is Calibration-only: wallet fund defaults to 314159
+        // and rejects mainnet, so suggesting it on chain 314 would send an
+        // agent to fund the wrong network. Mainnet gets prose guidance only.
+        const calibration = c.options.chain === 314159
         return out.fail(
           'ADDRESS_NOT_ON_CHAIN',
-          `${client.account.address} has no onchain history on chain ${c.options.chain} yet — every balance is zero. Fund it first: wallet fund (testnet) or send FIL to the address (mainnet).`,
-          {
-            cta: {
-              description: 'Fund this address:',
-              commands: [
-                {
-                  command: 'wallet fund',
-                  description: 'Claim free testnet FIL + USDFC (Calibration)',
+          `${client.account.address} has no onchain history on chain ${c.options.chain} yet — every balance is zero. ${
+            calibration
+              ? 'Fund it first: wallet fund.'
+              : 'Fund it first by sending FIL and USDFC to the address (there is no mainnet faucet).'
+          }`,
+          calibration
+            ? {
+                cta: {
+                  description: 'Fund this address:',
+                  commands: [
+                    {
+                      command: 'wallet fund',
+                      description:
+                        'Claim free testnet FIL + USDFC (Calibration)',
+                    },
+                  ],
                 },
-              ],
-            },
-          }
+              }
+            : undefined
         )
       }
       return out.fail('BALANCE_FETCH_FAILED', message)

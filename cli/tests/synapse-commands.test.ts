@@ -485,6 +485,22 @@ describe('wallet commands', () => {
     expect(result.cta.commands[0]).toMatchObject({ command: 'wallet fund' })
   })
 
+  // wallet fund is Calibration-only; recommending it on mainnet would point
+  // an agent's funding workflow at the wrong network.
+  test('wallet balance on mainnet never suggests the testnet faucet', async () => {
+    synapsePayments.walletBalance.mockImplementationOnce(async () => {
+      throw new Error('multicall3... actor not found (RetCode=1)')
+    })
+
+    const result = await balanceCommand.run(
+      commandContext({ options: { chain: 314 } })
+    )
+
+    expect(result.error.code).toBe('ADDRESS_NOT_ON_CHAIN')
+    expect(result.error.message).toContain('no mainnet faucet')
+    expect(result.cta).toBeUndefined()
+  })
+
   test('wallet init --keystore rejects a directory instead of configuring it', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'foc-cli-test-'))
     tempDirs.push(dir)
