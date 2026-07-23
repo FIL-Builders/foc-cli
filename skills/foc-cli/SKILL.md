@@ -40,7 +40,7 @@ FOC turns Filecoin into a **programmable cloud** with four layers:
 
 **Data model:** Files → **Pieces** (by CID) → grouped into **Data Sets** on PDP providers → funded by **Payment Rails** (continuous USDFC streams).
 
-**Pricing (Synapse v1, per-operation):** storage is billed as a size-based rate per copy per month **plus a flat per-data-set monthly fee** — v1 removed the old fixed per-account minimum, so there is no single "minimum/month" number anymore. Default is 2 copies. Don't hardcode a price from memory: run `wallet costs --extraBytes <n> --extraRunway <months>` for the live rate, deposit needed, and whether an operator approval is still required. Treat that command as the source of truth.
+**Pricing (Synapse v1, per-operation):** storage is billed as a size-based rate per copy per month **plus a flat per-data-set monthly fee** — v1 removed the old fixed per-account minimum, so there is no single "minimum/month" number anymore. Default is 2 copies. Don't hardcode a price from memory: run `wallet costs --extraBytes <n> --extraRunway <months>` for a live estimate of the rate, deposit needed, and whether an operator approval is still required. It approximates the requested copies (default 2) against your existing datasets; the upload itself re-quotes (and funds) via its own prepare() at execution time, so treat the upload-time quote as final.
 
 ## Setup
 
@@ -147,7 +147,7 @@ To acceptance-test a whole dataset, list its piece CIDs via `piece list` or `dat
 | `wallet deposit <amount>` | Deposit USDFC into payment account |
 | `wallet withdraw <amount>` | Withdraw USDFC from payment account |
 | `wallet summary` | Account summary with funding timeline |
-| `wallet costs --extraBytes N --extraRunway N` | Live upload cost: per-month rate, `depositNeeded`, `alreadyCovered`, and `needsFwssMaxApproval` (true = funds suffice but a one-time operator approval is still required) |
+| `wallet costs --extraBytes N --extraRunway N` | Estimated upload cost (`--copies`, default 2): per-month rate, `depositNeeded`, `alreadyCovered`, and `needsFwssMaxApproval` (true = funds suffice but a one-time operator approval is still required). The upload re-quotes at execution time |
 
 ### Dataset Management
 

@@ -49,7 +49,7 @@ Every command supports `-h` for usage and `--schema --format json` for its JSON 
 |-------|----------|-------|
 | Upload | `upload <path>` · `multi-upload <a,b>` | Auto provider/dataset. `--copies N`, `--withCDN` |
 | Download | `download <pieceCid> [--out <path>]` | Bytes validated against the CID — retrieval is the verification |
-| Wallet | `wallet init` · `balance` · `fund` · `deposit` · `withdraw` · `summary` · `costs` | `fund` = testnet faucet. `costs` = live pricing (source of truth) |
+| Wallet | `wallet init` · `balance` · `fund` · `deposit` · `withdraw` · `summary` · `costs` | `fund` = testnet faucet. `costs` = live estimate |
 | Datasets | `dataset list` · `details` · `create` · `terminate` | `details` paginates pieces with next-page + fetch-all CTAs |
 | Pieces | `piece list <id>` · `piece remove <id> <pieceId>` | Paginated with next-page + fetch-all CTAs |
 | Providers | `provider list` | Approved PDP providers with location, pricing, performance |
@@ -65,7 +65,7 @@ Every command supports `-h` for usage and `--schema --format json` for its JSON 
 
 All commands default to **Calibration testnet**; add `--chain 314` for mainnet. Testnet tokens are one command (`wallet fund`). Mainnet needs real FIL for gas and USDFC for storage — see the [funding guide](skills/foc-cli/references/mainnet-funding.md).
 
-**Pricing:** billed per copy per month by size (default 2 copies) plus a flat per-data-set monthly fee. `wallet costs` is the source of truth.
+**Pricing:** billed per copy per month by size (default 2 copies) plus a flat per-data-set monthly fee. `wallet costs` gives a live estimate; the upload itself re-quotes (and funds) at execution time.
 
 ## Agent Skills
 

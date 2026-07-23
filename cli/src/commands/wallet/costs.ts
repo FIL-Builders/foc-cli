@@ -6,7 +6,7 @@ import { synapseClient } from '../../synapse.ts'
 
 export const costsCommand = {
   description:
-    'Estimate storage costs before uploading: live per-month rate, required deposit, and whether an operator approval is still needed. Prices the number of copies the next upload will create (default 2, like upload). Read-only — spends nothing.',
+    'Estimate storage costs before uploading: live per-month rate, required deposit, and whether an operator approval is still needed. Approximates the requested copies (default 2, like upload) against your existing datasets; the actual upload selects providers itself and re-quotes via its own prepare(), so treat the upload-time quote as final. Read-only — spends nothing.',
   mcp: {
     annotations: { title: 'Estimate storage costs', readOnlyHint: true },
   },
@@ -65,12 +65,17 @@ export const costsCommand = {
         .filter((ds) => ds.live && ds.managed && ds.pdpEndEpoch === 0n)
         .map((ds) => ds.dataSetId)
 
-      // Price what the next upload will actually pay for: prepare() applies
+      // Approximate what the next upload will pay for: prepare() applies
       // dataSize once per supplied context, so the estimate must contain
       // exactly `copies` contexts — pricing every active dataset made the
       // quote scale with historical dataset count instead. Reuse existing
       // datasets first (their current size shifts the effective rate and they
       // carry no creation fee), then pad with new-dataset placeholders.
+      // Known approximation (tracked for full alignment with upload's
+      // provider selection): upload picks reachable UNIQUE providers and
+      // matches source/CDN metadata, so it may not reuse the datasets chosen
+      // here — creation fees, CDN lockups, and depositNeeded can differ. The
+      // upload itself re-quotes via its own prepare() before spending.
       const reused = await Promise.all(
         dataSetIds
           .slice(0, copies)
