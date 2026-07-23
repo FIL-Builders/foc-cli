@@ -43,7 +43,7 @@ export function commandOutput<T extends z.ZodRawShape>(shape: T) {
   })
 }
 
-interface CTA {
+export interface CTA {
   description?: string
   commands: {
     command: string
@@ -51,6 +51,23 @@ interface CTA {
     options?: Record<string, any>
     description: string
   }[]
+}
+
+/**
+ * Stamp the active chain onto every command in a CTA so follow-ups never
+ * silently fall back to the default network — a command run with --chain 314
+ * must not hand an agent a CTA that quietly targets Calibration. Use only
+ * where every suggested command accepts --chain (docs and wallet init don't).
+ * An explicit chain already present in a command's options wins.
+ */
+export function chainCta(chain: number, cta: CTA): CTA {
+  return {
+    ...cta,
+    commands: cta.commands.map((cmd) => ({
+      ...cmd,
+      options: { chain, ...(cmd.options ?? {}) },
+    })),
+  }
 }
 
 interface DoneOpts {

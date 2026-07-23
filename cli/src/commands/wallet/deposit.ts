@@ -1,6 +1,6 @@
 import { parseUnits } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 import { hashLink, txExplorerUrl } from '../../utils.ts'
 
@@ -57,7 +57,7 @@ export const depositCommand = {
           txExplorerUrl: txExplorerUrl(hash, chain),
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             description: 'Next steps:',
             commands: [
               {
@@ -66,7 +66,7 @@ export const depositCommand = {
               },
               { command: 'upload', description: 'Upload a file' },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

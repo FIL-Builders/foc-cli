@@ -2,7 +2,7 @@ import { getPiecesWithMetadata } from '@filoz/synapse-core/pdp-verifier'
 import { getPdpDataSet } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { privateKeyClient } from '../../client.ts'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, pieceScannerUrl } from '../../utils.ts'
 
 export const listCommand = {
@@ -107,7 +107,7 @@ export const listCommand = {
           ...(hasMore ? { nextOffset } : {}),
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               ...nextPage,
               {
@@ -121,7 +121,7 @@ export const listCommand = {
                 description: 'View full dataset details',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

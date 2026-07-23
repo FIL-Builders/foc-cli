@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
-import { commandOutput, OutputContext } from '../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../output.ts'
 import { synapseClient } from '../synapse.ts'
 import { pieceScannerUrl } from '../utils.ts'
 
@@ -95,7 +95,7 @@ export const downloadCommand = {
       // at this source is wrong, and retrying the same source cannot fix it.
       if (message.includes('PieceCID verification failed')) {
         return out.fail('INTEGRITY_MISMATCH', message, {
-          cta: {
+          cta: chainCta(c.options.chain, {
             description: 'The source served corrupt data. Try another route:',
             commands: [
               {
@@ -109,7 +109,7 @@ export const downloadCommand = {
                 description: 'Pick a specific provider (--providerAddress)',
               },
             ],
-          },
+          }),
         })
       }
       // Deterministic input error: the given --providerAddress is not a
@@ -139,7 +139,7 @@ export const downloadCommand = {
           path: outputPath,
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               {
                 command: 'piece list',
@@ -151,7 +151,7 @@ export const downloadCommand = {
                 description: 'List your datasets',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {
@@ -161,7 +161,7 @@ export const downloadCommand = {
           'FILE_EXISTS',
           `${outputPath} already exists. Pass --force to overwrite it, or --out to write elsewhere.`,
           {
-            cta: {
+            cta: chainCta(c.options.chain, {
               commands: [
                 {
                   command: 'download',
@@ -173,7 +173,7 @@ export const downloadCommand = {
                   description: 'Overwrite the existing file',
                 },
               ],
-            },
+            }),
           }
         )
       }

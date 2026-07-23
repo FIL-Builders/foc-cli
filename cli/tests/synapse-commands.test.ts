@@ -1105,12 +1105,12 @@ describe('dataset commands', () => {
     expect(result.nextOffset).toBe(6)
     expect(result.cta.commands).toContainEqual({
       command: 'dataset details',
-      options: { dataSetId: 42, offset: 6, limit: 1 },
+      options: { chain: 314159, dataSetId: 42, offset: 6, limit: 1 },
       description: 'Show the next page of pieces (offset 6)',
     })
     expect(result.cta.commands).toContainEqual({
       command: 'dataset details',
-      options: { dataSetId: 42, offset: 0, limit: 2 },
+      options: { chain: 314159, dataSetId: 42, offset: 0, limit: 2 },
       description: 'Fetch all 2 pieces in one call',
     })
   })
@@ -1177,13 +1177,13 @@ describe('piece commands', () => {
     expect(result.cta.commands).toContainEqual({
       command: 'piece list',
       args: { dataSetId: 42 },
-      options: { offset: 6, limit: 1 },
+      options: { chain: 314159, offset: 6, limit: 1 },
       description: 'Show the next page of pieces (offset 6)',
     })
     expect(result.cta.commands).toContainEqual({
       command: 'piece list',
       args: { dataSetId: 42 },
-      options: { offset: 0, limit: 2 },
+      options: { chain: 314159, offset: 0, limit: 2 },
       description: 'Fetch all 2 pieces in one call',
     })
   })
@@ -1860,5 +1860,111 @@ describe('command output schema discovery', () => {
       schema.safeParse({ status: 'already_configured', configPath: '/c' })
         .success
     ).toBe(true)
+  })
+})
+
+describe('cta chain propagation', () => {
+  // A command run with --chain 314 must never hand an agent a follow-up
+  // command that silently defaults back to Calibration. Every chain-aware
+  // CTA is stamped via chainCta(); this sweep runs the CTA-emitting commands
+  // on mainnet and rejects any suggested command that lost the chain.
+  function expectCtaChain(result: any, chain: number) {
+    expect(result.cta).toBeDefined()
+    for (const cmd of result.cta.commands) {
+      expect(cmd.options?.chain).toBe(chain)
+    }
+  }
+
+  test('dataset list CTA carries chain 314', async () => {
+    const result = await datasetListCommand.run(
+      commandContext({ options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('dataset details CTA (incl. pagination entries) carries chain 314', async () => {
+    const result = await datasetDetailsCommand.run(
+      commandContext({ options: { chain: 314, dataSetId: 42 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('dataset create CTAs carry chain 314', async () => {
+    const result = await datasetCreateCommand.run(
+      commandContext({ args: { providerId: 77 }, options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('dataset terminate CTA carries chain 314', async () => {
+    const result = await datasetTerminateCommand.run(
+      commandContext({ args: { dataSetId: 42 }, options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('piece list CTA carries chain 314', async () => {
+    const result = await pieceListCommand.run(
+      commandContext({ args: { dataSetId: 42 }, options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('piece remove CTA carries chain 314', async () => {
+    const result = await pieceRemoveCommand.run(
+      commandContext({
+        args: { dataSetId: 42, pieceId: 7 },
+        options: { chain: 314 },
+      })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('provider list CTA carries chain 314', async () => {
+    const result = await providerListCommand.run(
+      commandContext({ options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('wallet deposit CTA carries chain 314', async () => {
+    const result = await depositCommand.run(
+      commandContext({ args: { amount: '1' }, options: { chain: 314 } })
+    )
+    expectCtaChain(result, 314)
+  })
+
+  test('wallet fund CTA carries the active chain', async () => {
+    const result = await fundCommand.run(commandContext())
+    expectCtaChain(result, 314159)
+  })
+
+  test('wallet balance faucet CTA carries the calibration chain explicitly', async () => {
+    synapsePayments.walletBalance.mockImplementationOnce(async () => {
+      throw new Error('actor not found')
+    })
+    const result = await balanceCommand.run(commandContext())
+    expectCtaChain(result, 314159)
+  })
+
+  test('download success and FILE_EXISTS CTAs carry chain 314', async () => {
+    const marker = await tempFile('marker.txt', '')
+    const freshPath = path.join(path.dirname(marker), 'dl.bin')
+    const ok = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { chain: 314, out: freshPath },
+      })
+    )
+    expectCtaChain(ok, 314)
+
+    const exists = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { chain: 314, out: freshPath },
+      })
+    )
+    expect(exists.error.code).toBe('FILE_EXISTS')
+    expectCtaChain(exists, 314)
   })
 })

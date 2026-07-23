@@ -3,7 +3,7 @@ import { getPdpDataSet } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { waitForTransactionReceipt } from 'viem/actions'
 import { privateKeyClient } from '../../client.ts'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
 export const removeCommand = {
@@ -72,7 +72,7 @@ export const removeCommand = {
           pieceId,
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               {
                 command: 'piece list',
@@ -81,7 +81,7 @@ export const removeCommand = {
               },
               { command: 'dataset list', description: 'View all datasets' },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

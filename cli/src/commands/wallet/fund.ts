@@ -1,7 +1,7 @@
 import { claimTokens, formatBalance } from '@filoz/synapse-core/utils'
 import { z } from 'incur'
 import { waitForTransactionReceipt } from 'viem/actions'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
 export const fundCommand = {
@@ -47,7 +47,7 @@ export const fundCommand = {
       }
 
       return out.done(result, {
-        cta: {
+        cta: chainCta(c.options.chain, {
           description: 'Next steps:',
           commands: [
             {
@@ -57,7 +57,7 @@ export const fundCommand = {
             },
             { command: 'wallet balance', description: 'Check balances' },
           ],
-        },
+        }),
       })
     } catch (error) {
       return out.fail('FUND_FAILED', (error as Error).message)

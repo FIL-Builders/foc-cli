@@ -2,7 +2,7 @@ import * as sp from '@filoz/synapse-core/sp'
 import { getPDPProvider } from '@filoz/synapse-core/sp-registry'
 import { z } from 'incur'
 import { privateKeyClient } from '../../client.ts'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
 export const createCommand = {
@@ -58,7 +58,7 @@ export const createCommand = {
           'providerId argument required in non-interactive mode',
           {
             retryable: true,
-            cta: {
+            cta: chainCta(c.options.chain, {
               description: 'List providers first:',
               commands: [
                 {
@@ -66,7 +66,7 @@ export const createCommand = {
                   description: 'List available providers',
                 },
               ],
-            },
+            }),
           }
         )
       }
@@ -94,7 +94,7 @@ export const createCommand = {
           providerId: provider.id,
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             description: 'Next steps:',
             commands: [
               {
@@ -109,7 +109,7 @@ export const createCommand = {
                 description: 'Inspect the new dataset',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

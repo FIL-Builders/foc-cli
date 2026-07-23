@@ -1,7 +1,7 @@
 import { terminateServiceSync } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { privateKeyClient } from '../../client.ts'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
 export const terminateCommand = {
@@ -52,14 +52,14 @@ export const terminateCommand = {
           status: 'terminated',
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               {
                 command: 'dataset list',
                 description: 'View remaining datasets',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

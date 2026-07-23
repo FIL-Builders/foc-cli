@@ -1,7 +1,7 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { TOKENS } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
 export const balanceCommand = {
@@ -64,7 +64,7 @@ export const balanceCommand = {
           }`,
           calibration
             ? {
-                cta: {
+                cta: chainCta(c.options.chain, {
                   description: 'Fund this address:',
                   commands: [
                     {
@@ -73,7 +73,7 @@ export const balanceCommand = {
                         'Claim free testnet FIL + USDFC (Calibration)',
                     },
                   ],
-                },
+                }),
               }
             : undefined
         )

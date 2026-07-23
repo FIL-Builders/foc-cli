@@ -2,7 +2,7 @@ import { getPdpDataSets } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { getBlockNumber } from 'viem/actions'
 import { privateKeyClient } from '../../client.ts'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl } from '../../utils.ts'
 
 export const listCommand = {
@@ -60,14 +60,14 @@ export const listCommand = {
       return out.done(
         { datasets, blockNumber },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               {
                 command: 'dataset details',
                 description: 'View pieces and metadata for a dataset',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

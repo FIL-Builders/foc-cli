@@ -5,7 +5,7 @@ import { Readable } from 'node:stream'
 import type { StorageContext } from '@filoz/synapse-sdk/storage'
 import { z } from 'incur'
 import type { Hex } from 'viem'
-import { commandOutput, OutputContext } from '../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../output.ts'
 import { selectHealthyProviders } from '../provider-selection.ts'
 import { synapseClient } from '../synapse.ts'
 import {
@@ -263,13 +263,13 @@ export const multiUploadCommand = {
       return out.done(
         { status: 'uploaded', results },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             description: 'Next steps:',
             commands: [
               { command: 'dataset list', description: 'View all datasets' },
               { command: 'wallet balance', description: 'Check balances' },
             ],
-          },
+          }),
         }
       )
     } catch (error) {

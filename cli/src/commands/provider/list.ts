@@ -3,7 +3,7 @@ import { getApprovedPDPProviders } from '@filoz/synapse-core/sp-registry'
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { z } from 'incur'
 import { publicClient } from '../../client.ts'
-import { commandOutput, OutputContext } from '../../output.ts'
+import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { dealbotDashboardUrl, formatBytes } from '../../utils.ts'
 
 export const listCommand = {
@@ -83,7 +83,7 @@ export const listCommand = {
           providers,
         },
         {
-          cta: {
+          cta: chainCta(c.options.chain, {
             commands: [
               {
                 command: 'dataset create',
@@ -94,7 +94,7 @@ export const listCommand = {
                 description: 'Upload a file (auto-selects provider)',
               },
             ],
-          },
+          }),
         }
       )
     } catch (error) {
