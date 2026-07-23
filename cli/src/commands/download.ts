@@ -7,11 +7,13 @@ import { pieceScannerUrl } from '../utils.ts'
 
 export const downloadCommand = {
   description:
-    'Download a piece by CID and verify the bytes against it (retrieval is cryptographic proof of storage). Writes to --out (default ./<pieceCid>), overwriting any existing file at that path.',
+    'Download a piece by CID and verify the bytes against it (retrieval is cryptographic proof of storage). Writes to --out (default ./<pieceCid>); refuses to overwrite an existing file unless --force is passed.',
   mcp: {
     annotations: {
       title: 'Download and verify a piece',
-      destructiveHint: false,
+      // --force can overwrite existing local files, so the tool as a whole
+      // must not claim to be non-destructive.
+      destructiveHint: true,
       idempotentHint: true,
     },
   },
@@ -32,6 +34,10 @@ export const downloadCommand = {
         'Output file path (defaults to ./<pieceCid> in the current directory)'
       ),
     withCDN: z.boolean().optional().describe('Prefer CDN retrieval'),
+    force: z
+      .boolean()
+      .optional()
+      .describe('Overwrite an existing file at the output path'),
     providerAddress: z
       .string()
       .optional()
@@ -119,7 +125,10 @@ export const downloadCommand = {
     const outputPath = path.resolve(c.options.out ?? c.args.pieceCid)
     try {
       out.step('Writing file')
-      await writeFile(outputPath, bytes)
+      // Exclusive creation by default ('wx'): silently clobbering local data
+      // is the one destructive thing this read-mostly command could do. An
+      // explicit --force opts into overwriting.
+      await writeFile(outputPath, bytes, c.options.force ? {} : { flag: 'wx' })
 
       return out.done(
         {
@@ -147,6 +156,27 @@ export const downloadCommand = {
       )
     } catch (error) {
       if (c.options.debug) console.error(error)
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return out.fail(
+          'FILE_EXISTS',
+          `${outputPath} already exists. Pass --force to overwrite it, or --out to write elsewhere.`,
+          {
+            cta: {
+              commands: [
+                {
+                  command: 'download',
+                  args: { pieceCid: c.args.pieceCid },
+                  options: {
+                    ...(c.options.out ? { out: c.options.out } : {}),
+                    force: true,
+                  },
+                  description: 'Overwrite the existing file',
+                },
+              ],
+            },
+          }
+        )
+      }
       // The piece downloaded and validated; only the local write failed
       // (permissions, missing directory, disk full). Not a retrieval problem.
       return out.fail(

@@ -1210,7 +1210,10 @@ describe('synapse client construction', () => {
 
 describe('download command', () => {
   test('download retrieves validated bytes and writes them to the output path', async () => {
-    const outPath = await tempFile('downloaded.bin', '')
+    // A sibling of a real temp file, but not pre-created: default download
+    // mode is exclusive creation and refuses existing paths.
+    const marker = await tempFile('marker.txt', '')
+    const outPath = path.join(path.dirname(marker), 'downloaded.bin')
     const result = await downloadCommand.run(
       commandContext({
         args: { pieceCid: 'baga-piece' },
@@ -1233,7 +1236,8 @@ describe('download command', () => {
   })
 
   test('download passes withCDN and providerAddress through to the SDK', async () => {
-    const outPath = await tempFile('cdn.bin', '')
+    const marker = await tempFile('marker.txt', '')
+    const outPath = path.join(path.dirname(marker), 'cdn.bin')
     await downloadCommand.run(
       commandContext({
         args: { pieceCid: 'baga-piece' },
@@ -1599,6 +1603,36 @@ describe('download error taxonomy', () => {
     } finally {
       process.chdir(prevCwd)
     }
+  })
+
+  test('download refuses to overwrite an existing file without --force', async () => {
+    const existing = await tempFile('already-there.bin', 'precious')
+
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: existing },
+      })
+    )
+
+    expect(result.error.code).toBe('FILE_EXISTS')
+    expect(result.cta.commands[0].options).toMatchObject({ force: true })
+    // The original bytes must be untouched.
+    expect((await readFile(existing)).toString()).toBe('precious')
+  })
+
+  test('download --force overwrites the existing file', async () => {
+    const existing = await tempFile('already-there.bin', 'precious')
+
+    const result = await downloadCommand.run(
+      commandContext({
+        args: { pieceCid: 'baga-piece' },
+        options: { out: existing, force: true },
+      })
+    )
+
+    expect(result.verified).toBe(true)
+    expect([...(await readFile(existing))]).toEqual([1, 2, 3, 4])
   })
 })
 
