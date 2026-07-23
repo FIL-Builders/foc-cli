@@ -43,9 +43,14 @@ export const balanceCommand = {
       const message = (error as Error).message
       // A brand-new address has no onchain actor until it first receives
       // funds, and this is the first command a new user runs after wallet
-      // init — the raw viem multicall dump ("actor not found") must not be
-      // their first impression.
-      if (message.includes('actor not found')) {
+      // init — the raw viem multicall dump must not be their first
+      // impression. The RPC wording varies: older Glif nodes say "actor not
+      // found"; current ones fail the eth_call with "failed to apply on
+      // state with gas" (live-observed 2026-07-23).
+      if (
+        message.includes('actor not found') ||
+        message.includes('failed to apply on state')
+      ) {
         // The faucet CTA is Calibration-only: wallet fund defaults to 314159
         // and rejects mainnet, so suggesting it on chain 314 would send an
         // agent to fund the wrong network. Mainnet gets prose guidance only.

@@ -485,6 +485,22 @@ describe('wallet commands', () => {
     expect(result.cta.commands[0]).toMatchObject({ command: 'wallet fund' })
   })
 
+  // Live-observed 2026-07-23: current Glif Calibration nodes report a fresh
+  // address as "failed to apply on state with gas" instead of "actor not
+  // found" — both must map to the humanized envelope.
+  test('wallet balance humanizes the newer failed-to-apply-on-state RPC variant', async () => {
+    synapsePayments.walletBalance.mockImplementationOnce(async () => {
+      throw new Error(
+        'RPC Request failed.\n\nDetails: RPC error (-32603): failed to apply on state with gas'
+      )
+    })
+
+    const result = await balanceCommand.run(commandContext())
+
+    expect(result.error.code).toBe('ADDRESS_NOT_ON_CHAIN')
+    expect(result.cta.commands[0]).toMatchObject({ command: 'wallet fund' })
+  })
+
   // wallet fund is Calibration-only; recommending it on mainnet would point
   // an agent's funding workflow at the wrong network.
   test('wallet balance on mainnet never suggests the testnet faucet', async () => {
