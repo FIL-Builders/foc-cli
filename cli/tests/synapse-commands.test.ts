@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -539,6 +540,38 @@ describe('wallet commands', () => {
       method: 'keystore',
       path: filePath,
     })
+  })
+
+  // Without the isFile() gate this test HANGS: readFileSync on a FIFO with no
+  // writer blocks the process, which is exactly the failure being prevented.
+  test('wallet init --keystore rejects a FIFO instead of reading it', async () => {
+    const marker = await tempFile('marker.txt', 'x')
+    const fifoPath = path.join(path.dirname(marker), 'keystore.fifo')
+    execFileSync('mkfifo', [fifoPath])
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: fifoPath }, agent: false })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INVALID')
+    expect(result.error.message).toContain('regular file')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keystore',
+      expect.anything()
+    )
+  })
+
+  test('wallet init --keystore rejects JSON whose crypto field is not an object', async () => {
+    const filePath = await tempFile(
+      'fake-keystore.json',
+      JSON.stringify({ crypto: 'not-an-object' })
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keystore: filePath }, agent: false })
+    )
+
+    expect(result.error.code).toBe('KEYSTORE_INVALID')
   })
 
   test('wallet init --keystore is rejected in agent mode before touching config', async () => {

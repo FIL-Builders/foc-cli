@@ -21,15 +21,29 @@ function validateKeystoreFile(
       message: `Keystore file not found: ${path}`,
     }
   }
-  if (statSync(path).isDirectory()) {
+  const stats = statSync(path)
+  if (stats.isDirectory()) {
     return {
       code: 'KEYSTORE_INVALID',
       message: `${path} is a directory, not a keystore file. cast wallet new/import writes a file named by a random UUID inside that directory — pass the file's full path.`,
     }
   }
+  // Not just directories: a FIFO or device node reaches the synchronous read
+  // below and can block the whole CLI/MCP process indefinitely.
+  if (!stats.isFile()) {
+    return {
+      code: 'KEYSTORE_INVALID',
+      message: `${path} is not a regular file. Pass the path to an encrypted keystore file created with cast wallet new or cast wallet import.`,
+    }
+  }
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'))
-    if (!parsed || typeof parsed !== 'object' || !('crypto' in parsed)) {
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      typeof parsed.crypto !== 'object' ||
+      parsed.crypto === null
+    ) {
       return {
         code: 'KEYSTORE_INVALID',
         message: `${path} is not an encrypted keystore (expected JSON with a "crypto" field). Create one with cast wallet new or cast wallet import — see the keystore-setup guide.`,
