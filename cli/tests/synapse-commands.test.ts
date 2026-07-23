@@ -872,12 +872,29 @@ describe('wallet commands', () => {
     })
     expect(result).toMatchObject({
       availableFunds: 'formatted:1',
-      timeRemaining: '1h 0d 0w 0m 0y',
+      timeRemaining: '~1h',
       totalLockup: 'formatted:2',
       rateBasedLockup: 'formatted:3',
       monthlyAccountRate: 'formatted:4',
       funds: 'formatted:5',
     })
+  })
+
+  // The old formatter concatenated the same duration in five units
+  // ("17468h 727d 103w 25m 2y"); each runway must render as ONE unit.
+  test('wallet summary renders the funding runway in a single unit', async () => {
+    getAccountSummary.mockImplementationOnce(async () => ({
+      availableFunds: 1n,
+      totalLockup: 2n,
+      totalRateBasedLockup: 3n,
+      lockupRatePerMonth: 4n,
+      funds: 5n,
+      runwayInEpochs: 2096160n, // 17468 hours ≈ 2 years
+    }))
+
+    const result = await summaryCommand.run(commandContext())
+
+    expect(result.timeRemaining).toBe('~2y')
   })
 })
 
