@@ -91,8 +91,18 @@ export const uploadCommand = {
       // never buffer the whole piece in memory. Only the size is needed up
       // front (for prepare), which stat provides without reading a byte.
       const absolutePath = path.resolve(c.args.path)
-      const { size } = await stat(absolutePath)
-      const fileStream = Readable.toWeb(createReadStream(absolutePath))
+      const stats = await stat(absolutePath)
+      // stat() succeeds for directories, FIFOs, sockets, and devices — their
+      // size would flow into prepare() and a funding transaction could execute
+      // before createReadStream errored or blocked. Reject non-regular files
+      // here, before any provider selection or onchain spend.
+      if (!stats.isFile()) {
+        return out.fail(
+          'NOT_A_FILE',
+          `${absolutePath} is not a regular file. Pass a path to a readable file.`
+        )
+      }
+      const { size } = stats
 
       out.step('Checking provider health')
       const selection = await selectHealthyProviders(
@@ -129,6 +139,9 @@ export const uploadCommand = {
       }
 
       out.step('Uploading file')
+      // Open the stream only now — immediately before it is consumed — so a
+      // file that vanished or changed since stat surfaces here, not earlier.
+      const fileStream = Readable.toWeb(createReadStream(absolutePath))
       const result = await synapse.storage.upload(fileStream, {
         contexts,
         withCDN: c.options.withCDN,

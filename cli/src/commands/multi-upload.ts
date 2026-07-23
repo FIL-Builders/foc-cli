@@ -104,13 +104,19 @@ export const multiUploadCommand = {
       const absolutePaths = c.args.paths.map((filePath: string) =>
         path.resolve(filePath)
       )
-      // All-or-nothing gate without buffering: verify readability and collect
-      // sizes (for prepare) up front, then stream each file at store time —
-      // peak memory stays flat instead of holding the whole batch.
+      // All-or-nothing gate without buffering: verify each path is a readable
+      // regular file and collect sizes (for prepare) up front, then stream
+      // each file at store time — peak memory stays flat instead of holding
+      // the whole batch. access+stat alone would pass directories and FIFOs,
+      // which only fail (or block) in store() — after contexts and funding.
       const fileStatsSettled = await Promise.allSettled(
         absolutePaths.map(async (filePath: string) => {
           await access(filePath, constants.R_OK)
-          return (await stat(filePath)).size
+          const stats = await stat(filePath)
+          if (!stats.isFile()) {
+            throw new Error('not a regular file')
+          }
+          return stats.size
         })
       )
       const fileReadRejected = fileStatsSettled

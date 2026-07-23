@@ -412,6 +412,36 @@ describe('top-level upload commands', () => {
     expect(synapseStorage.createContexts).not.toHaveBeenCalled()
     expect(synapseStorage.upload).not.toHaveBeenCalled()
   })
+
+  // A directory passes stat() with a size, so without an isFile() gate the
+  // funding transaction could execute before the stream ever failed.
+  test('upload rejects a directory before contexts or prepare can run', async () => {
+    const insideDir = await tempFile('marker.txt', 'x')
+    const dir = path.dirname(insideDir)
+
+    const result = await uploadCommand.run(
+      commandContext({ args: { path: dir } })
+    )
+
+    expect(result.error.code).toBe('NOT_A_FILE')
+    expect(result.error.message).toContain(dir)
+    expect(synapseStorage.createContexts).not.toHaveBeenCalled()
+    expect(synapseStorage.prepare).not.toHaveBeenCalled()
+  })
+
+  test('multi-upload rejects a batch mixing a regular file and a directory before contexts or prepare', async () => {
+    const readable = await tempFile('readable.txt', 'ok')
+    const dir = path.dirname(readable)
+
+    const result = await multiUploadCommand.run(
+      commandContext({ args: { paths: [readable, dir] } })
+    )
+
+    expect(result.error.code).toBe('FILE_READ_FAILED')
+    expect(result.error.message).toContain(dir)
+    expect(synapseStorage.createContexts).not.toHaveBeenCalled()
+    expect(synapseStorage.prepare).not.toHaveBeenCalled()
+  })
 })
 
 describe('wallet commands', () => {
