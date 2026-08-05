@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { basename, dirname } from 'node:path'
 import { getChain } from '@filoz/synapse-core/chains'
+import { Errors } from 'incur'
 import { createPublicClient, createWalletClient, type Hex, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import config from './config.ts'
@@ -15,6 +16,7 @@ import {
   providerNames,
   redactKeyLike,
   resolveKeyRef,
+  unsafeRefReason,
 } from './key-ref.ts'
 import type { OutputContext } from './output.ts'
 import { canPrompt, expandHome } from './utils.ts'
@@ -24,6 +26,21 @@ type Problem = {
   message: string
   cta?: any
   retryable?: boolean
+}
+
+/**
+ * "Reconfigure the reference", for the several ways a stored one can be broken.
+ * A wallet is configured (badly), so every suggestion carries --force or it
+ * would bounce off WALLET_ALREADY_CONFIGURED.
+ */
+function reconfigureRefCta() {
+  return {
+    description: 'Reconfigure the reference:',
+    commands: keyRefCtaCommands().map((cmd) => ({
+      ...cmd,
+      options: { ...cmd.options, force: true },
+    })),
+  }
 }
 
 /**
@@ -76,14 +93,7 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
         // passed to --key-ref, and this message is the one place that mistake
         // would be echoed into a log. The command to fix it says the shape.
         message: `The configured key reference (${redactKeyLike(raw)}) is not of the form <provider>:<reference> — e.g. clawdi:FILECOIN_PRIVATE_KEY. Reconfigure it with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
-        cta: {
-          description: 'Reconfigure the reference:',
-          commands: keyRefCtaCommands().map((cmd) => ({
-            ...cmd,
-            // A wallet is configured (badly), so replacing it needs --force.
-            options: { ...cmd.options, force: true },
-          })),
-        },
+        cta: reconfigureRefCta(),
       }
     }
     // Before the PATH probe, which cannot tell "this provider does not exist"
@@ -95,13 +105,24 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
       return {
         code: 'UNKNOWN_KEY_REF_PROVIDER',
         message: `The configured key reference names an unknown provider "${parsed.provider}". Supported: ${providerNames().join(', ')}. Reconfigure it with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
-        cta: {
-          description: 'Reconfigure the reference:',
-          commands: keyRefCtaCommands().map((cmd) => ({
-            ...cmd,
-            options: { ...cmd.options, force: true },
-          })),
-        },
+        cta: reconfigureRefCta(),
+      }
+    }
+    // Cheap and config-only, so it belongs with the other guard checks rather
+    // than at use time: a reference or scope holding characters the resolver
+    // refuses is a permanent misconfiguration, and catching it here is what
+    // gives it a call to action instead of a bare throw mid-command.
+    for (const [what, value] of [
+      ['reference', parsed.ref],
+      ['project', config.get('keyRefProject')],
+    ] as const) {
+      const reason = value === undefined ? null : unsafeRefReason(value)
+      if (reason) {
+        return {
+          code: 'MALFORMED_KEY_REF',
+          message: `Malformed key ${what} in config: it ${reason}. Reconfigure the wallet with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
+          cta: reconfigureRefCta(),
+        }
       }
     }
     if (!isProviderAvailable(parsed.provider)) {
@@ -220,9 +241,11 @@ function privateKeyFromConfig() {
   if (!keystore) {
     const privateKey = config.get('privateKey')
     if (!privateKey) {
-      throw new Error(
-        'Private key not found. Please run `foc-cli wallet init` to initialize the CLI'
-      )
+      throw new Errors.IncurError({
+        code: 'WALLET_NOT_CONFIGURED',
+        message:
+          'Private key not found. Please run `foc-cli wallet init` to initialize the CLI',
+      })
     }
     return privateKey
   }
@@ -249,13 +272,18 @@ function privateKeyFromConfig() {
     // through to the terminal; this message decodes what that output means
     // rather than re-reading it.
     if ((error as { code?: string }).code === 'ENOENT') {
-      throw new Error(
-        'Failed to access keystore: Foundry `cast` is not on PATH. Install Foundry (https://getfoundry.sh), or switch to a private-key wallet with `foc-cli wallet init`.'
-      )
+      throw new Errors.IncurError({
+        code: 'KEYSTORE_TOOL_MISSING',
+        retryable: true,
+        message:
+          'Failed to access keystore: Foundry `cast` is not on PATH. Install Foundry (https://getfoundry.sh), or switch to a private-key wallet with `foc-cli wallet init`.',
+      })
     }
-    throw new Error(
-      'Failed to access keystore. "Mac Mismatch" above means the password was wrong. Other causes: an invalid keystore file, or a session with no terminal for the password prompt — keystore mode is interactive-only, so MCP/CI must use a private-key wallet.'
-    )
+    throw new Errors.IncurError({
+      code: 'KEYSTORE_DECRYPT_FAILED',
+      message:
+        'Failed to access keystore. "Mac Mismatch" above means the password was wrong. Other causes: an invalid keystore file, or a session with no terminal for the password prompt — keystore mode is interactive-only, so MCP/CI must use a private-key wallet.',
+    })
   }
 
   // The same bounded matcher the key-reference path uses, for the same reason:
@@ -265,14 +293,17 @@ function privateKeyFromConfig() {
   // same shape, one matcher.
   const found = findPrivateKeys(extraction)
   if (found.length === 0) {
-    throw new Error(
-      "Keystore decrypted, but no private key (0x + 64 hex, on its own rather than inside a longer value) was found in cast's output. Check `cast wallet decrypt-keystore` works on this file directly — the output is not shown here on purpose."
-    )
+    throw new Errors.IncurError({
+      code: 'KEYSTORE_NOT_A_KEY',
+      message:
+        "Keystore decrypted, but no private key (0x + 64 hex, on its own rather than inside a longer value) was found in cast's output. Check `cast wallet decrypt-keystore` works on this file directly — the output is not shown here on purpose.",
+    })
   }
   if (found.length > 1) {
-    throw new Error(
-      `Keystore decrypted to output containing ${found.length} different 0x + 64 hex values, so which one is the key is ambiguous. Use a keystore that holds a single key — the values are not shown here on purpose.`
-    )
+    throw new Errors.IncurError({
+      code: 'KEYSTORE_AMBIGUOUS',
+      message: `Keystore decrypted to output containing ${found.length} different 0x + 64 hex values, so which one is the key is ambiguous. Use a keystore that holds a single key — the values are not shown here on purpose.`,
+    })
   }
   return found[0]
 }

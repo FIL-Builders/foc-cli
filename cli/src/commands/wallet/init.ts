@@ -11,6 +11,7 @@ import {
   parseKeyRef,
   providerNames,
   redactKeyLike,
+  unsafeRefReason,
 } from '../../key-ref.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
 import { canPrompt, expandHome, isAgent } from '../../utils.ts'
@@ -326,6 +327,79 @@ export const initCommand = {
       config.set('source', c.options.source)
     }
 
+    // --keyProject on its own re-scopes the reference already configured. Both
+    // reference docs tell the reader to do exactly this, and describe it as
+    // never blocked — which was true, but only because nothing consumed it:
+    // no branch matched, so the command fell through to `already_configured`,
+    // wrote nothing, and reported success. The caller then believed a scope was
+    // pinned that never was, and every command kept resolving against the
+    // provider's default project.
+    if (c.options.keyProject !== undefined && !c.options.keyRef) {
+      // Paired with a method that configures a different custody mode there is
+      // nothing for a scope to apply to, and this branch runs before those
+      // methods — so say so rather than either shadowing them or repeating the
+      // silent-ignore this whole branch exists to remove.
+      if (c.options.auto || c.options.privateKey || c.options.keystore) {
+        return out.fail(
+          'KEY_PROJECT_WITHOUT_KEY_REF',
+          '--key-project scopes a key reference, and --auto, --private-key and --keystore all configure a wallet that uses none. Drop --key-project, or configure a reference with --key-ref instead.'
+        )
+      }
+      const currentRef = config.get('keyRef')
+      if (!currentRef) {
+        return out.fail(
+          'KEY_PROJECT_WITHOUT_KEY_REF',
+          '--key-project scopes a key reference, and this wallet does not use one. Pass --key-ref <provider>:<reference> alongside it, or drop --key-project.',
+          {
+            cta: {
+              description: 'Configure a reference and its scope together:',
+              commands: keyRefCtaCommands().map((cmd) => ({
+                ...cmd,
+                options: { ...cmd.options, keyProject: c.options.keyProject },
+              })),
+            },
+          }
+        )
+      }
+      const badProject = c.options.keyProject
+        ? unsafeRefReason(c.options.keyProject)
+        : null
+      if (badProject) {
+        return out.fail(
+          'INVALID_KEY_PROJECT',
+          `Invalid key project: it ${badProject}.`
+        )
+      }
+
+      out.step('Scoping key reference')
+      // An empty value is how a scope is dropped deliberately — the same
+      // convention the --keyRef branch below uses.
+      if (c.options.keyProject) {
+        config.set('keyRefProject', c.options.keyProject)
+      } else {
+        config.delete('keyRefProject')
+      }
+      const parsed = parseKeyRef(currentRef)
+      const providerAvailable = parsed
+        ? isProviderAvailable(parsed.provider)
+        : false
+      if (!agent) {
+        out.success(
+          c.options.keyProject
+            ? `Key reference ${currentRef} is now scoped to project ${c.options.keyProject}.`
+            : `Key reference ${currentRef} is no longer scoped to a project.`
+        )
+        p.outro("You're all set!")
+      }
+      return out.done({
+        status: 'configured',
+        method: 'keyRef',
+        keyRef: currentRef,
+        keyProject: config.get('keyRefProject'),
+        providerAvailable,
+      })
+    }
+
     // Before --keystore and --privateKey so an explicit method always wins, and
     // deliberately allowed in agent mode: unlike a keystore there is no prompt,
     // so this is the one custody mode that works from MCP with no key at rest.
@@ -347,6 +421,28 @@ export const initCommand = {
         return out.fail(
           'UNKNOWN_KEY_REF_PROVIDER',
           `Unknown key-reference provider "${parsed.provider}". Supported: ${providerNames().join(', ')}.`
+        )
+      }
+      // Init is the only moment this is cheap to catch, and the file says so
+      // about keystore paths a few lines up. Without it, a reference the
+      // resolver will always refuse was stored anyway — `wallet init` reported
+      // `configured` and cleared the previous wallet, and every command after
+      // it failed with "re-run `foc-cli wallet init`", pointing back at the
+      // command that had just accepted the value.
+      const badRef = unsafeRefReason(parsed.ref)
+      if (badRef) {
+        return out.fail(
+          'INVALID_KEY_REF',
+          `Invalid key reference: it ${badRef}.`
+        )
+      }
+      const badProject = c.options.keyProject
+        ? unsafeRefReason(c.options.keyProject)
+        : null
+      if (badProject) {
+        return out.fail(
+          'INVALID_KEY_PROJECT',
+          `Invalid key project: it ${badProject}.`
         )
       }
       // Validate the shape only, not that it resolves. Resolution needs the

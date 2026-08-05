@@ -45,7 +45,9 @@ A configured scope survives re-running the same reference without `--keyProject`
 
 **Replacing a configured wallet needs `--force`.** `wallet init` refuses rather than overwrite: on a terminal it asks, and in agent/MCP mode it fails with `WALLET_ALREADY_CONFIGURED` and a CTA repeating the command with `force: true`. The refusal states what actually happens, which differs by mode — replacing a `privateKey` wallet destroys the only copy of that key, while a keystore file stays on disk and a vault key stays in the vault.
 
-Two things are *not* replacements and are never blocked: re-running the same reference, and adding or changing `--keyProject` on a reference that is already configured (it re-scopes the same lookup).
+Two things are *not* replacements and are never blocked: re-running the same reference, and adding or changing `--keyProject` on a reference that is already configured (it re-scopes the same lookup). `--keyProject` on its own does that re-scoping without restating the reference; on a wallet that uses no reference it is refused with `KEY_PROJECT_WITHOUT_KEY_REF` rather than silently ignored.
+
+A reference or scope that could never resolve — characters outside the allowed set, or a leading `-` the provider's CLI would read as an option — is refused by `wallet init` itself, before anything is written. Init is the only moment that mistake is cheap to catch.
 
 Configuring a reference before installing the provider is allowed — provisioning often runs in a fixed order. `wallet init` returns `providerAvailable: false` in that case and warns; nothing is at risk until a command signs.
 
@@ -74,21 +76,26 @@ Wallet-touching commands check the cheap things first — every custody mode, no
 | Code | Meaning |
 |---|---|
 | `WALLET_NOT_CONFIGURED` | No wallet at all. The CTA lists the methods that would work here. |
-| `MALFORMED_KEY_REF` | A reference is configured but is not `<provider>:<reference>`. The CTA repeats the setup command with `force: true`. The offending value is redacted if it looks like a key — the usual cause is a private key passed to `--keyRef`. |
+| `MALFORMED_KEY_REF` | A reference is configured but is not `<provider>:<reference>`, or it (or `keyRefProject`) holds characters the resolver refuses — including a leading `-`, which the provider's CLI would read as one of its own options. The CTA repeats the setup command with `force: true`. The offending value is redacted if it looks like a key — the usual cause is a private key passed to `--keyRef`. |
 | `UNKNOWN_KEY_REF_PROVIDER` | The prefix parses but names no provider this CLI version supports — a typo, or a reference copied from a newer CLI. Permanent, so **not** retryable; the message lists the supported providers. |
 | `KEY_REF_PROVIDER_MISSING` | A reference is configured, its provider is recognized, but the helper is not on this process's PATH. Marked `retryable`, and deliberately carries **no** command: the wallet is fine, and the fix (install the helper, or launch from a shell that sees it) is outside foc-cli. Do not "fix" it by re-initializing — that throws the working reference away. |
 | `KEYSTORE_INTERACTIVE_ONLY` | A keystore wallet with no terminal to answer its password prompt on — MCP, or a session with no tty at all. A pipe or redirect is not that: `wallet balance --json \| jq` keeps working, because `cast` reads the password from `/dev/tty`. |
 | `KEYSTORE_TOOL_MISSING` | A keystore wallet, but Foundry `cast` is not on this process's PATH. Retryable; the keystore file is untouched. |
 | `WALLET_ALREADY_CONFIGURED` | `wallet init` would replace the configured wallet. Re-run with `--force`. |
+| `INVALID_KEY_REF` / `INVALID_KEY_PROJECT` | From `wallet init` itself, when the value passed could never resolve. It is refused rather than stored, so the previous wallet is left alone. |
+| `KEY_PROJECT_WITHOUT_KEY_REF` | `--keyProject` on a wallet that uses no key reference. There is nothing for a scope to apply to. |
 
-Resolution failures happen later, at use time:
+Resolution failures happen later, at use time — when the key is actually fetched. They are typed too, so an agent gets a code and a `retryable` flag rather than an untyped `UNKNOWN`:
 
-| Message | Cause → fix |
+| Code | Cause → fix |
 |---|---|
-| `... is not on PATH` | The provider's CLI is not installed, or not on the PATH of the process running foc-cli (a GUI-launched agent often has a shorter PATH than your shell). |
-| `Failed to resolve the wallet key from <provider>` | The provider ran and refused: not logged in, key missing, or wrong project scope. The message lists the checks for that provider. |
-| `... does not hold a private key` | The reference resolved, but the value is not `0x` + 64 hex standing on its own — it points at the wrong field, or at a field holding a longer blob the key is embedded in. A partial match is never accepted: any 32 bytes form a valid key, so a truncated one would sign as a different address instead of failing. |
-| `... to output containing N different 0x + 64 hex values` | The field holds more than one key-shaped value, so which one to use is ambiguous. Point the reference at a field holding only the key. |
-| `Malformed key reference in config` | Not `<provider>:<reference>`. Normally caught earlier as `MALFORMED_KEY_REF`. |
-| `Malformed key reference/project in config` | The reference or `--keyProject` contains characters outside `A-Za-z0-9`, space, and `@ _ . : / -`. Everything here reaches a child process's argv — and on Windows, a shell — so the set is restricted on purpose. |
-| `Unknown key-reference provider` | Typo, or a provider this CLI version does not support. Normally caught earlier as `UNKNOWN_KEY_REF_PROVIDER`. |
+| `KEY_REF_PROVIDER_MISSING` | The provider's CLI is not installed, or not on the PATH of the process running foc-cli (a GUI-launched agent often has a shorter PATH than your shell). **Retryable.** |
+| `KEY_REF_RESOLUTION_FAILED` | The provider ran and refused: not logged in, key missing, or wrong project scope. The message lists the checks for that provider. **Not** retryable — each cause needs a deliberate act, so retrying only burns the session. |
+| `KEY_REF_NOT_A_KEY` | The reference resolved, but the value is not `0x` + 64 hex standing on its own — it points at the wrong field, or at a field holding a longer blob the key is embedded in. A partial match is never accepted: any 32 bytes form a valid key, so a truncated one would sign as a different address instead of failing. |
+| `KEY_REF_AMBIGUOUS` | The field holds more than one key-shaped value, so which one to use is ambiguous. Point the reference at a field holding only the key. |
+| `MALFORMED_KEY_REF` / `UNKNOWN_KEY_REF_PROVIDER` | The same conditions the guard checks, reached at use time — normally the guard catches them first. |
+| `KEYSTORE_TOOL_MISSING` | Foundry `cast` vanished from PATH between the guard and the decrypt. **Retryable.** |
+| `KEYSTORE_DECRYPT_FAILED` | Wrong password ("Mac Mismatch"), an invalid keystore file, or no terminal for the prompt. |
+| `KEYSTORE_NOT_A_KEY` / `KEYSTORE_AMBIGUOUS` | `cast` succeeded but its output held no single key — the same two checks the reference path applies, for the same reason. |
+
+The codes are shared between the guard and use time on purpose: the distinction is an implementation detail, and the fix is identical either way.

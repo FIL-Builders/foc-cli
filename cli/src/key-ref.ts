@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { statSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
+import { Errors } from 'incur'
 
 /**
  * Resolving a wallet key held by an external secret manager.
@@ -53,8 +54,42 @@ const PROVIDERS: Record<string, Provider> = {
  * config cannot turn key resolution into arbitrary command execution. The set
  * covers every reference shape the providers actually accept (`KEY`,
  * `vault/KEY`, `vault/section:odd/KEY`) and excludes every cmd metacharacter.
+ *
+ * A leading `-` is excluded separately, and for a different reason: it is a
+ * perfectly ordinary character in the middle of a reference, but at the front
+ * it stops being data. `clawdi:--project` spreads into argv as `clawdi vault
+ * resolve --project`, so the value steers the helper's own option parsing
+ * instead of naming a secret — which breaks the same promise by a route that
+ * has nothing to do with shell metacharacters. Not arbitrary execution, but
+ * config controlling the helper's flags is more than "only the reference comes
+ * from config" allows.
  */
-const SAFE_REF = /^[A-Za-z0-9 @_.:/-]+$/
+const SAFE_REF = /^[A-Za-z0-9 @_.:/][A-Za-z0-9 @_.:/-]*$/
+
+/**
+ * Why this reference or project scope cannot be used — as a clause completing
+ * "it …" — or null if the value is fine.
+ *
+ * A fragment rather than a whole sentence because the callers frame it
+ * differently and both framings are right: `wallet init` is describing an
+ * option the caller just typed, and `resolveKeyRef` a value already sitting in
+ * the config file.
+ *
+ * Exported so init can refuse at the moment the mistake is cheap to correct.
+ * Without that it stored anything shaped like `<provider>:<ref>`, reported
+ * `configured`, cleared the previous wallet — and every later command failed
+ * with "re-run `foc-cli wallet init`", sending the user back to the command
+ * that had just accepted the value.
+ */
+export function unsafeRefReason(value: string): string | null {
+  if (value.startsWith('-')) {
+    return `cannot start with "-", which the provider's own CLI would read as an option rather than as a value`
+  }
+  if (!SAFE_REF.test(value)) {
+    return 'may only contain letters, digits, space, and @ _ . : / - — every character here is passed to another program, so the set is restricted on purpose'
+  }
+  return null
+}
 
 export function providerNames(): string[] {
   return Object.keys(PROVIDERS)
@@ -227,35 +262,65 @@ const binCache = new Map<string, string>()
  * Every failure message below is written to be actionable without ever echoing
  * what came back — a resolver that fails part-way can return anything, and the
  * one thing it must never do is print it.
+ *
+ * They are also all `IncurError`, which is what makes them useful to an agent.
+ * This function runs at *use* time, from inside the client construction that
+ * every signing command performs before its try block — so a plain Error here
+ * reached incur's top-level handler and rendered as `{ code: 'UNKNOWN' }` with
+ * no code and no `retryable`, which is the single most common failure an agent
+ * sees from a vault-backed wallet (not logged in, vault not attached, wrong
+ * field). Typing it at the throw fixes every path at once, including commands
+ * that do not exist yet.
+ *
+ * Moving the construction inside each command's try would *not* have fixed it:
+ * those catches end in `out.fail('UPLOAD_FAILED', ...)` and friends, so a key
+ * that could not be fetched would be reported as an upload that failed.
+ *
+ * Codes match the ones `walletPreflight` emits for the same conditions. The
+ * distinction between "caught early by the guard" and "discovered at use time"
+ * is an implementation detail, and the caller's fix is identical either way.
  */
 export function resolveKeyRef(keyRef: string, project?: string): string {
   const parsed = parseKeyRef(keyRef)
   if (!parsed) {
-    throw new Error(
-      `Malformed key reference in config: expected "<provider>:<reference>", e.g. clawdi:FILECOIN_PRIVATE_KEY. Re-run \`foc-cli wallet init --key-ref <provider>:<reference>\`.`
-    )
+    throw new Errors.IncurError({
+      code: 'MALFORMED_KEY_REF',
+      message: `Malformed key reference in config: expected "<provider>:<reference>", e.g. clawdi:FILECOIN_PRIVATE_KEY.`,
+      hint: 'Re-run `foc-cli wallet init --key-ref <provider>:<reference> --force`.',
+    })
   }
   const provider = PROVIDERS[parsed.provider]
   if (!provider) {
-    throw new Error(
-      `Unknown key-reference provider "${parsed.provider}". Supported: ${providerNames().join(', ')}.`
-    )
+    throw new Errors.IncurError({
+      code: 'UNKNOWN_KEY_REF_PROVIDER',
+      message: `Unknown key-reference provider "${parsed.provider}". Supported: ${providerNames().join(', ')}.`,
+      hint: 'Re-run `foc-cli wallet init --key-ref <provider>:<reference> --force`.',
+    })
   }
 
   for (const [what, value] of [
     ['reference', parsed.ref],
     ['project', project],
   ] as const) {
-    if (value !== undefined && !SAFE_REF.test(value)) {
-      throw new Error(
-        `Malformed key ${what} in config: it contains characters that are not allowed in a ${what} (letters, digits, space, and @ _ . : / -). Re-run \`foc-cli wallet init --key-ref <provider>:<reference>\`.`
-      )
+    const reason = value === undefined ? null : unsafeRefReason(value)
+    if (reason) {
+      throw new Errors.IncurError({
+        code: 'MALFORMED_KEY_REF',
+        message: `Malformed key ${what} in config: it ${reason}.`,
+        hint: 'Re-run `foc-cli wallet init --key-ref <provider>:<reference> --force`.',
+      })
     }
   }
 
   const bin = resolveBin(provider.bin)
   if (!bin) {
-    throw new Error(`Failed to resolve the wallet key: ${provider.install}`)
+    throw new Errors.IncurError({
+      code: 'KEY_REF_PROVIDER_MISSING',
+      // Retryable for the same reason the preflight says so: the wallet is
+      // intact and a PATH gap is usually transient, especially under an agent.
+      retryable: true,
+      message: `Failed to resolve the wallet key: ${provider.install}`,
+    })
   }
 
   let output: string
@@ -269,11 +334,19 @@ export function resolveKeyRef(keyRef: string, project?: string): string {
     // it is an installation problem.
     const code = (error as { code?: string }).code
     if (code === 'ENOENT' || code === 'EINVAL' || code === 'ENOEXEC') {
-      throw new Error(`Failed to resolve the wallet key: ${provider.install}`)
+      throw new Errors.IncurError({
+        code: 'KEY_REF_PROVIDER_MISSING',
+        retryable: true,
+        message: `Failed to resolve the wallet key: ${provider.install}`,
+      })
     }
-    throw new Error(
-      `Failed to resolve the wallet key from ${parsed.provider} (${parsed.ref}). ${provider.diagnose}`
-    )
+    // Not retryable: the provider ran and said no. Every cause below needs a
+    // deliberate act (log in, attach the vault, fix the reference), and an
+    // agent that retries instead of acting just burns the session.
+    throw new Errors.IncurError({
+      code: 'KEY_REF_RESOLUTION_FAILED',
+      message: `Failed to resolve the wallet key from ${parsed.provider} (${parsed.ref}). ${provider.diagnose}`,
+    })
   }
 
   // Scrape rather than trust the whole of stdout: helpers add human framing
@@ -283,14 +356,16 @@ export function resolveKeyRef(keyRef: string, project?: string): string {
   // is the key.
   const found = findPrivateKeys(output)
   if (found.length === 0) {
-    throw new Error(
-      `${parsed.provider} resolved "${parsed.ref}" but it does not hold a private key (expected 0x + 64 hex, on its own rather than inside a longer value). Check the reference points at the right field — the value is not shown here on purpose.`
-    )
+    throw new Errors.IncurError({
+      code: 'KEY_REF_NOT_A_KEY',
+      message: `${parsed.provider} resolved "${parsed.ref}" but it does not hold a private key (expected 0x + 64 hex, on its own rather than inside a longer value). Check the reference points at the right field — the value is not shown here on purpose.`,
+    })
   }
   if (found.length > 1) {
-    throw new Error(
-      `${parsed.provider} resolved "${parsed.ref}" to output containing ${found.length} different 0x + 64 hex values, so which one is the key is ambiguous. Point the reference at a field that holds only the key — the values are not shown here on purpose.`
-    )
+    throw new Errors.IncurError({
+      code: 'KEY_REF_AMBIGUOUS',
+      message: `${parsed.provider} resolved "${parsed.ref}" to output containing ${found.length} different 0x + 64 hex values, so which one is the key is ambiguous. Point the reference at a field that holds only the key — the values are not shown here on purpose.`,
+    })
   }
   return found[0]
 }

@@ -171,6 +171,26 @@ describe('walletPreflight — key reference', () => {
     })
   })
 
+  test('a reference the resolver would refuse is caught here, with a way out', () => {
+    // Cheap and config-only, so it belongs with the other guard checks: caught
+    // here it carries a call to action, whereas at use time it is a bare throw
+    // from inside client construction.
+    configValues.keyRef = 'clawdi:MY KEY&touch x'
+    withBins(['clawdi'], () => {
+      const problem = walletPreflight({ agent: true })
+      expect(problem?.code).toBe('MALFORMED_KEY_REF')
+      expect(problem?.cta).toBeDefined()
+    })
+  })
+
+  test('a project scope that would become a provider flag is caught too', () => {
+    configValues.keyRef = 'clawdi:FILECOIN_PRIVATE_KEY'
+    configValues.keyRefProject = '--project'
+    withBins(['clawdi'], () => {
+      expect(walletPreflight({ agent: true })?.code).toBe('MALFORMED_KEY_REF')
+    })
+  })
+
   test('takes precedence over the other modes, matching key resolution order', () => {
     configValues.keyRef = 'clawdi:FILECOIN_PRIVATE_KEY'
     configValues.keystore = '/tmp/keystore'

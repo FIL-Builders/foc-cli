@@ -8,6 +8,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Errors } from 'incur'
 import {
   isKnownProvider,
   parseKeyRef,
@@ -176,6 +177,25 @@ describe('resolveKeyRef', () => {
     expect(existsSync(canary)).toBe(false)
   })
 
+  test('a reference or project starting with "-" is rejected as an option, not passed as one', () => {
+    // Not command execution, but it breaks the same promise by another route:
+    // `clawdi:--project` reaches argv as `clawdi vault resolve --project`, so
+    // config would be steering the helper's own flag parsing rather than
+    // naming a secret. Every other position of "-" stays legal.
+    withFakeClawdi(`echo "${KEY}"`, () => {
+      for (const bad of ['--project', '-x', '--help']) {
+        expect(() => resolveKeyRef(`clawdi:${bad}`)).toThrow(
+          /Malformed key reference in config/
+        )
+      }
+      expect(() =>
+        resolveKeyRef('clawdi:FILECOIN_PRIVATE_KEY', '--project')
+      ).toThrow(/Malformed key project in config/)
+      // A dash inside the value is ordinary and must keep working.
+      expect(resolveKeyRef('clawdi:FILECOIN-PRIVATE-KEY')).toBe(KEY)
+    })
+  })
+
   test('nested reference paths survive the allowlist', () => {
     // The shapes clawdi actually writes must not be collateral damage.
     for (const ref of [
@@ -250,5 +270,82 @@ describe('resolveKeyRef', () => {
     } finally {
       process.env.PATH = previous
     }
+  })
+})
+
+/**
+ * Every failure here is typed.
+ *
+ * This function runs at *use* time, from inside the client construction that
+ * every signing command performs before its try block — so a plain Error
+ * reached incur's top-level handler and rendered as `{ code: 'UNKNOWN' }` with
+ * no code and no retryable flag. That is the shape an agent sees for the most
+ * common failure a vault-backed wallet has: installed but not logged in.
+ *
+ * Moving the construction inside each command's try would not have fixed it.
+ * Those catches end in `out.fail('UPLOAD_FAILED', ...)` and friends, so a key
+ * that could not be fetched would have been reported as an upload that failed
+ * — typed, and wrong. Typing the throw is what fixes every command at once.
+ */
+describe('resolveKeyRef error taxonomy', () => {
+  function thrownBy(run: () => void): Errors.IncurError {
+    try {
+      run()
+    } catch (error) {
+      expect(error).toBeInstanceOf(Errors.IncurError)
+      return error as Errors.IncurError
+    }
+    throw new Error('expected a throw')
+  }
+
+  test('a reference with no provider prefix is MALFORMED_KEY_REF', () => {
+    expect(thrownBy(() => resolveKeyRef('FILECOIN_PRIVATE_KEY')).code).toBe(
+      'MALFORMED_KEY_REF'
+    )
+  })
+
+  test('an unrecognized provider is UNKNOWN_KEY_REF_PROVIDER', () => {
+    expect(thrownBy(() => resolveKeyRef('vault:KEY')).code).toBe(
+      'UNKNOWN_KEY_REF_PROVIDER'
+    )
+  })
+
+  test('a provider that ran and refused is not retryable', () => {
+    // The distinction that matters to an agent: this needs a deliberate act
+    // (log in, attach the vault, fix the reference), so retrying is waste.
+    withFakeClawdi('exit 1', () => {
+      const error = thrownBy(() => resolveKeyRef('clawdi:FILECOIN_PRIVATE_KEY'))
+      expect(error.code).toBe('KEY_REF_RESOLUTION_FAILED')
+      expect(error.retryable).toBe(false)
+    })
+  })
+
+  test('a provider that is not installed is retryable', () => {
+    // Whereas a PATH gap usually is transient — the wallet is intact.
+    const previous = process.env.PATH
+    process.env.PATH = mkdtempSync(join(tmpdir(), 'foc-empty-path-'))
+    try {
+      const error = thrownBy(() => resolveKeyRef('clawdi:FILECOIN_PRIVATE_KEY'))
+      expect(error.code).toBe('KEY_REF_PROVIDER_MISSING')
+      expect(error.retryable).toBe(true)
+    } finally {
+      process.env.PATH = previous
+    }
+  })
+
+  test('a reference pointing at the wrong field is KEY_REF_NOT_A_KEY', () => {
+    withFakeClawdi('echo "not-a-key"', () => {
+      expect(thrownBy(() => resolveKeyRef('clawdi:WRONG')).code).toBe(
+        'KEY_REF_NOT_A_KEY'
+      )
+    })
+  })
+
+  test('two candidate keys are KEY_REF_AMBIGUOUS rather than a guess', () => {
+    withFakeClawdi(`echo "${KEY} 0x${'b'.repeat(64)}"`, () => {
+      expect(thrownBy(() => resolveKeyRef('clawdi:BOTH')).code).toBe(
+        'KEY_REF_AMBIGUOUS'
+      )
+    })
   })
 })

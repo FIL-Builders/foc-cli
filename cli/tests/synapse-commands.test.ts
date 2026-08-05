@@ -833,6 +833,96 @@ describe('wallet commands', () => {
     expect(JSON.stringify(result.cta)).not.toContain('b'.repeat(32))
   })
 
+  // Init is the only moment this is cheap to catch. Storing it anyway meant
+  // `configured` was reported, the previous wallet was cleared, and every
+  // command afterwards failed with "re-run `foc-cli wallet init`" — pointing
+  // back at the command that had just accepted the value.
+  test('wallet init --keyRef refuses a reference no command could ever resolve', async () => {
+    const result = await initCommand.run(
+      commandContext({ options: { keyRef: 'clawdi:MY KEY&touch x' } })
+    )
+
+    expect(result.error.code).toBe('INVALID_KEY_REF')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keyRef',
+      expect.anything()
+    )
+  })
+
+  test('wallet init --keyRef refuses a reference that would become a provider flag', async () => {
+    const result = await initCommand.run(
+      commandContext({ options: { keyRef: 'clawdi:--project' } })
+    )
+
+    expect(result.error.code).toBe('INVALID_KEY_REF')
+    expect(result.error.message).toContain('option')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keyRef',
+      expect.anything()
+    )
+  })
+
+  test('wallet init --keyProject is validated too', async () => {
+    const result = await initCommand.run(
+      commandContext({
+        options: {
+          keyRef: 'clawdi:FILECOIN_PRIVATE_KEY',
+          keyProject: 'proj & id',
+        },
+      })
+    )
+
+    expect(result.error.code).toBe('INVALID_KEY_PROJECT')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keyRef',
+      expect.anything()
+    )
+  })
+
+  // Both reference docs tell the reader to do exactly this. Nothing consumed
+  // it, so the command fell through to already_configured, wrote nothing, and
+  // reported success — leaving the caller believing a scope was pinned.
+  test('wallet init --keyProject alone re-scopes the configured reference', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'keyRef' ? 'clawdi:FILECOIN_PRIVATE_KEY' : undefined
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keyProject: 'engineering' } })
+    )
+
+    expect(result.status).toBe('configured')
+    expect(result.keyRef).toBe('clawdi:FILECOIN_PRIVATE_KEY')
+    expect(configStore.set).toHaveBeenCalledWith('keyRefProject', 'engineering')
+  })
+
+  test('wallet init --auto --keyProject is refused, not silently one or the other', async () => {
+    // This branch runs before --auto, so it must not shadow it: --auto with a
+    // scope is a contradiction, and answering it by quietly doing one of the
+    // two is the same silent-ignore the branch exists to remove.
+    const result = await initCommand.run(
+      commandContext({ options: { auto: true, keyProject: 'engineering' } })
+    )
+
+    expect(result.error.code).toBe('KEY_PROJECT_WITHOUT_KEY_REF')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'privateKey',
+      expect.anything()
+    )
+  })
+
+  test('wallet init --keyProject alone is refused when no reference is configured', async () => {
+    const result = await initCommand.run(
+      commandContext({ options: { keyProject: 'engineering' } })
+    )
+
+    expect(result.error.code).toBe('KEY_PROJECT_WITHOUT_KEY_REF')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'keyRefProject',
+      expect.anything()
+    )
+  })
+
   // The one custody mode the already-configured checks could not see: bare
   // `wallet init` fell past them to the interactive prompt, which writes a
   // private key and deletes the keystore — replacing a wallet with no --force
