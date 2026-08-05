@@ -44,16 +44,21 @@ FOC turns Filecoin into a **programmable cloud** with four layers:
 
 ## Setup
 
-Rule of thumb: `--auto` for quick start, testnet, and agent/automation use; keystore mode when the wallet will hold real funds.
+Rule of thumb: `--auto` for quick start and testnet; `--keyRef` when an agent, MCP, or CI needs a key that must not sit on disk; keystore mode for interactive use of a wallet holding real funds.
 
 ```bash
 npx foc-cli wallet init --auto              # quick start, testnet, agent/automation
+npx foc-cli wallet init --keyRef <p>:<ref>  # key stays in a secret manager, nothing at rest
 npx foc-cli wallet init --keystore <path>   # real funds: import an encrypted keystore file
 ```
 
-Config file (the `conf` package appends `-nodejs` to the app name): macOS `~/Library/Preferences/foc-cli-nodejs/config.json` · Linux `~/.config/foc-cli-nodejs/config.json` · Windows `%APPDATA%\foc-cli-nodejs\Config\config.json`. Keys: `privateKey`, `keystore`, `source`.
+Config file (the `conf` package appends `-nodejs` to the app name): macOS `~/Library/Preferences/foc-cli-nodejs/config.json` · Linux `~/.config/foc-cli-nodejs/config.json` · Windows `%APPDATA%\foc-cli-nodejs\Config\config.json`. Keys: `privateKey`, `keystore`, `keyRef`, `keyRefProject`, `source`.
+
+Only one custody mode is ever active — setting any of them clears the others. `wallet balance --json` reports which one is live as `keySource`, without revealing the key.
 
 **Keystore mode**: an encrypted Foundry keystore — the config stores only the path, and the key is decrypted per command via `cast`, which prompts for the password on the terminal. Interactive CLI only: it cannot work under the MCP server or CI (no terminal to prompt on — see MCP Integration). Full setup: [references/keystore-setup.md](references/keystore-setup.md).
+
+**Key-reference mode**: the config stores a `<provider>:<reference>` pointer to a key held in an external secret manager, and the key is fetched into memory per command. Nothing prompts, so unlike keystore mode this works under MCP and CI — with no key at rest anywhere. Full setup and the provider list: [references/key-injection.md](references/key-injection.md).
 
 **Private key safety — handle with caution:**
 
@@ -141,7 +146,7 @@ To acceptance-test a whole dataset, list its piece CIDs via `piece list` or `dat
 
 | Command | Description |
 |---------|-------------|
-| `wallet init [--auto\|--keystore <path>]` | Initialize wallet (a `--privateKey` flag exists for automation — avoid it; see Private key safety) |
+| `wallet init [--auto\|--keystore <path>\|--keyRef <provider>:<ref>]` | Initialize wallet (a `--privateKey` flag exists for automation — avoid it; see Private key safety) |
 | `wallet balance` | FIL/USDFC balances + payment account info |
 | `wallet fund` | Testnet faucet (FIL + USDFC) |
 | `wallet deposit <amount>` | Deposit USDFC into payment account |
@@ -241,7 +246,7 @@ npx foc-cli --mcp                      # start MCP server (stdio)
 
 Tools use underscores: `wallet_init`, `wallet_balance`, `dataset_list`, `upload`, etc. Tool definitions carry MCP annotations (`readOnlyHint`, `destructiveHint`) — clients can tell reads from fund-moving and destructive operations.
 
-**MCP requires a private-key wallet.** The MCP server has no terminal, and keystore mode prompts for its password on the tty at use time — so a keystore-configured wallet fails under MCP. Configure with `wallet init --auto` or `wallet init --privateKey <key>` instead; keystore mode is for interactive CLI use (see [references/keystore-setup.md](references/keystore-setup.md)).
+**MCP cannot use a keystore.** The MCP server has no terminal, and keystore mode prompts for its password on the tty at use time — so a keystore-configured wallet fails under MCP. Configure with `wallet init --auto`, `wallet init --keyRef <provider>:<ref>`, or `wallet init --privateKey <key>` instead. `--keyRef` is the one that keeps no key at rest ([references/key-injection.md](references/key-injection.md)); keystore mode is for interactive CLI use ([references/keystore-setup.md](references/keystore-setup.md)).
 
 ## Architecture
 

@@ -3,6 +3,7 @@ import * as p from '@clack/prompts'
 import { z } from 'incur'
 import { generatePrivateKey } from 'viem/accounts'
 import config from '../../config.ts'
+import { isKnownProvider, parseKeyRef, providerNames } from '../../key-ref.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
 import { expandHome, isAgent } from '../../utils.ts'
 
@@ -58,9 +59,14 @@ function validateKeystoreFile(
   return null
 }
 
+function clearKeyRef() {
+  config.delete('keyRef')
+  config.delete('keyRefProject')
+}
+
 export const initCommand = {
   description:
-    'Initialize wallet with a private key or keystore. An explicit method (--auto, --keystore, --privateKey) replaces any previously configured wallet; without one, an existing wallet is kept. Keystore mode prompts for its password on the terminal at use time, so it only works in interactive CLI sessions — agent mode rejects --keystore; use --auto or --privateKey.',
+    'Initialize wallet with a private key, a keystore, or a reference to a key held by an external secret manager. An explicit method (--auto, --keystore, --privateKey, --keyRef) replaces any previously configured wallet; without one, an existing wallet is kept. Keystore mode prompts for its password on the terminal at use time, so it only works in interactive CLI sessions — agent mode rejects --keystore; use --auto, --privateKey, or --keyRef. --keyRef stores only a reference and fetches the key per command, so it works from MCP and automation with no key at rest.',
   mcp: {
     annotations: {
       title: 'Configure wallet (replaces existing config)',
@@ -76,6 +82,18 @@ export const initCommand = {
         'Path to a Foundry keystore file (requires foundry; interactive CLI only — rejected in agent/MCP mode)'
       ),
     privateKey: z.string().optional().describe('Private key (0x-prefixed hex)'),
+    keyRef: z
+      .string()
+      .optional()
+      .describe(
+        'Reference to a key held by an external secret manager, as <provider>:<reference> (e.g. clawdi:FILECOIN_PRIVATE_KEY). Only the reference is stored; the key is fetched per command and never written to disk.'
+      ),
+    keyProject: z
+      .string()
+      .optional()
+      .describe(
+        "Scope --keyRef to a specific project. Omit to use the provider's own default."
+      ),
     source: z
       .string()
       .optional()
@@ -91,13 +109,23 @@ export const initCommand = {
         'configured: a wallet was (re)configured this run. already_configured: an existing wallet was kept because no explicit method was passed.'
       ),
     method: z
-      .enum(['auto', 'keystore', 'manual'])
+      .enum(['auto', 'keystore', 'manual', 'keyRef'])
       .optional()
       .describe('How the wallet was configured (absent on already_configured)'),
     path: z
       .string()
       .optional()
       .describe('Configured keystore path (method: keystore only)'),
+    keyRef: z
+      .string()
+      .optional()
+      .describe(
+        'Configured key reference, safe to display (method: keyRef only)'
+      ),
+    keyProject: z
+      .string()
+      .optional()
+      .describe('Project the reference is scoped to, when one was given'),
     configPath: z
       .string()
       .optional()
@@ -122,6 +150,17 @@ export const initCommand = {
       options: { auto: true, source: 'my-app' },
       description: 'Generate a key and set the source tag',
     },
+    {
+      options: { keyRef: 'clawdi:FILECOIN_PRIVATE_KEY' },
+      description: 'Use a key held in a Clawdi vault (nothing stored on disk)',
+    },
+    {
+      options: {
+        keyRef: 'clawdi:FILECOIN_PRIVATE_KEY',
+        keyProject: 'engineering',
+      },
+      description: 'Same, scoped to one project instead of the default',
+    },
   ],
   async run(c: any) {
     const out = new OutputContext(c)
@@ -129,6 +168,50 @@ export const initCommand = {
 
     if (c.options.source) {
       config.set('source', c.options.source)
+    }
+
+    // Before --keystore and --privateKey so an explicit method always wins, and
+    // deliberately allowed in agent mode: unlike a keystore there is no prompt,
+    // so this is the one custody mode that works from MCP with no key at rest.
+    if (c.options.keyRef) {
+      const parsed = parseKeyRef(c.options.keyRef)
+      if (!parsed) {
+        return out.fail(
+          'INVALID_KEY_REF',
+          `Invalid key reference "${c.options.keyRef}". Expected <provider>:<reference>, e.g. clawdi:FILECOIN_PRIVATE_KEY.`
+        )
+      }
+      if (!isKnownProvider(parsed.provider)) {
+        return out.fail(
+          'UNKNOWN_KEY_REF_PROVIDER',
+          `Unknown key-reference provider "${parsed.provider}". Supported: ${providerNames().join(', ')}.`
+        )
+      }
+      // Validate the shape only, not that it resolves. Resolution needs the
+      // provider to be installed and authenticated, which is a different
+      // failure with a different fix — and init must stay usable while setting
+      // a machine up in any order.
+      out.step('Configuring key reference')
+      config.set('keyRef', c.options.keyRef)
+      if (c.options.keyProject) {
+        config.set('keyRefProject', c.options.keyProject)
+      } else {
+        config.delete('keyRefProject')
+      }
+      // Clear the alternates: privateKeyFromConfig() prefers keyRef, so leaving
+      // a stale key behind would be a key at rest that nothing reads.
+      config.delete('privateKey')
+      config.delete('keystore')
+      if (!agent) {
+        p.log.info(`Key reference: ${c.options.keyRef}`)
+        p.outro("You're all set!")
+      }
+      return out.done({
+        status: 'configured',
+        method: 'keyRef',
+        keyRef: c.options.keyRef,
+        keyProject: c.options.keyProject,
+      })
     }
 
     if (c.options.keystore) {
@@ -167,6 +250,7 @@ export const initCommand = {
       out.step('Configuring keystore')
       config.set('keystore', keystorePath)
       config.delete('privateKey')
+      clearKeyRef()
       if (!agent) p.outro("You're all set!")
       return out.done({
         status: 'configured',
@@ -185,6 +269,7 @@ export const initCommand = {
       out.step('Configuring private key')
       config.set('privateKey', c.options.privateKey)
       config.delete('keystore')
+      clearKeyRef()
       if (!agent) p.outro("You're all set!")
       return out.done({ status: 'configured', method: 'manual' })
     }
@@ -194,9 +279,11 @@ export const initCommand = {
     if (c.options.auto) {
       const privateKey = generatePrivateKey()
       config.set('privateKey', privateKey)
-      // Clear the alternate credential too — privateKeyFromConfig() prefers a
-      // configured keystore, which would silently win over the new key.
+      // Clear the alternate credentials too — privateKeyFromConfig() prefers a
+      // configured keyRef, then a keystore, either of which would silently win
+      // over the new key.
       config.delete('keystore')
+      clearKeyRef()
       if (!agent) {
         p.intro('Initializing Synapse CLI...')
         p.log.success(`Private key: ${privateKey}`)
@@ -205,6 +292,25 @@ export const initCommand = {
       return out.done({
         status: 'configured',
         method: 'auto',
+        source: config.get('source') ?? 'foc-cli',
+      })
+    }
+
+    // A configured key reference counts as configured — it just holds a
+    // pointer rather than a key, so there is nothing to print but the pointer,
+    // which is safe to show.
+    const existingRef = config.get('keyRef')
+    if (existingRef) {
+      if (!agent) {
+        p.log.success(`Key reference: ${existingRef}`)
+        p.log.info(`Config file: ${config.path}`)
+        p.outro("You're all set!")
+      }
+      return out.done({
+        status: 'already_configured',
+        configPath: config.path,
+        keyRef: existingRef,
+        keyProject: config.get('keyRefProject'),
         source: config.get('source') ?? 'foc-cli',
       })
     }
@@ -228,7 +334,7 @@ export const initCommand = {
     if (agent) {
       return out.fail(
         'INIT_METHOD_REQUIRED',
-        'Use --auto or --privateKey for non-interactive init',
+        'Use --auto, --privateKey, or --keyRef for non-interactive init',
         {
           retryable: true,
           cta: {
@@ -243,6 +349,11 @@ export const initCommand = {
                 command: 'wallet init',
                 options: { privateKey: '0x...' },
                 description: 'Set key directly',
+              },
+              {
+                command: 'wallet init',
+                options: { keyRef: 'clawdi:FILECOIN_PRIVATE_KEY' },
+                description: 'Use a key from a secret manager (none at rest)',
               },
             ],
           },
@@ -265,6 +376,7 @@ export const initCommand = {
     }
     config.set('privateKey', privateKeyInput as string)
     config.delete('keystore')
+    clearKeyRef()
     p.outro("You're all set!")
     return out.done({ status: 'configured', method: 'manual' })
   },

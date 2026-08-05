@@ -4,9 +4,31 @@ import { getChain } from '@filoz/synapse-core/chains'
 import { createPublicClient, createWalletClient, type Hex, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import config from './config.ts'
+import { resolveKeyRef } from './key-ref.ts'
 import { expandHome } from './utils.ts'
 
+/**
+ * Which custody mode is configured, without resolving anything. Safe to call
+ * from read-only paths and from output formatting — it touches no secret and
+ * costs no round trip.
+ */
+export function keySource(): 'keyRef' | 'keystore' | 'privateKey' | 'none' {
+  if (config.get('keyRef')) return 'keyRef'
+  if (config.get('keystore')) return 'keystore'
+  if (config.get('privateKey')) return 'privateKey'
+  return 'none'
+}
+
 function privateKeyFromConfig() {
+  // First because it is the most explicit: only ever present when someone ran
+  // `wallet init --key-ref`, and it holds a reference rather than a key, so
+  // nothing is at rest. Absent on every other install, which is why the
+  // branches below are reached unchanged.
+  const keyRef = config.get('keyRef')
+  if (keyRef) {
+    return resolveKeyRef(keyRef, config.get('keyRefProject'))
+  }
+
   const keystore = config.get('keystore')
   if (!keystore) {
     const privateKey = config.get('privateKey')

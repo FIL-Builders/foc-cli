@@ -7,7 +7,10 @@
 - [Foundry](https://getfoundry.sh) installed (`cast` must be on `PATH`) — the CLI runs `cast w dk` internally.
 - **An interactive terminal.** The password prompt appears at *use* time (the first wallet command, not `wallet init`) and reads from the terminal's tty directly — redirecting stdin does not suppress or feed it. With no tty at all (the MCP server, CI, cron), decryption fails instead of prompting.
 
-**Keystore mode is interactive-CLI-only.** A keystore-configured wallet cannot work under the MCP server: there is no tty to prompt on, and no password-in-config option exists (deliberately — it would defeat the encryption). For MCP or any automation, configure a private-key wallet instead: `wallet init --auto` (testnet) or `wallet init --privateKey <key>`.
+**Keystore mode is interactive-CLI-only.** A keystore-configured wallet cannot work under the MCP server: there is no tty to prompt on, and no password-in-config option exists (deliberately — it would defeat the encryption). For MCP or any automation, use one of:
+
+- `wallet init --keyRef <provider>:<reference>` — the key stays in an external secret manager and is fetched per command. Nothing prompts and nothing is at rest, which makes it the closest equivalent to this mode for automation. See [key-injection.md](key-injection.md).
+- `wallet init --auto` (testnet) or `wallet init --privateKey <key>` — simplest, but the key lives in the config file.
 
 ## Setup
 

@@ -281,6 +281,15 @@ mock.module('../src/utils.ts', () => ({
 mock.module('../src/client.ts', () => ({
   privateKeyClient,
   publicClient,
+  // Reads the mocked config store, so it reports whatever a test configures.
+  keySource: () =>
+    configStore.get('keyRef')
+      ? 'keyRef'
+      : configStore.get('keystore')
+        ? 'keystore'
+        : configStore.get('privateKey')
+          ? 'privateKey'
+          : 'none',
 }))
 
 mock.module('@filoz/synapse-sdk', () => ({

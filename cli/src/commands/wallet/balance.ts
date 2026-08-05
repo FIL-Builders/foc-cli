@@ -1,6 +1,7 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { TOKENS } from '@filoz/synapse-sdk'
 import { z } from 'incur'
+import { keySource } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
@@ -17,6 +18,11 @@ export const balanceCommand = {
   }),
   alias: { chain: 'c' },
   output: commandOutput({
+    keySource: z
+      .enum(['keyRef', 'keystore', 'privateKey'])
+      .describe(
+        'Where the signing key came from. keyRef: fetched per command from an external secret manager, nothing at rest. keystore: decrypted from a Foundry keystore. privateKey: stored in the config file.'
+      ),
     address: z.string(),
     fil: z.string(),
     usdfc: z.string(),
@@ -91,6 +97,9 @@ async function fetchBalances(client: any, synapse: any) {
   const paymentsBalance = await synapse.payments.accountInfo()
 
   return {
+    // Reported so a vault-backed setup is verifiable at a glance: the address
+    // proves which key signed, this proves where it came from. Never the value.
+    keySource: keySource(),
     address: client.account.address,
     fil: formatBalance({ value: filBalance }),
     usdfc: formatBalance({ value: usdfcBalance }),
