@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Nothing yet.
 
+## [0.3.0] — 2026-08-05
+
+External key custody. `foc-cli` can now hold a *reference* to a key kept in a secret manager instead of the key itself, closing the gap that left MCP and CI with no option but a key in the config file. Contains one behaviour change to `wallet init` (hence the minor bump).
+
+### Added
+
+- `wallet init --keyRef <provider>:<reference>` — a third custody mode alongside a raw key and a Foundry keystore. The config stores only the pointer; the key is fetched into memory per command and never written to disk. Nothing prompts, so unlike keystore mode this works under the MCP server and CI. `--keyProject` scopes the reference; omitted, the provider picks its own default. `clawdi` is the first provider. ([#33])
+- `wallet balance` now reports `keySource` (`keyRef` / `keystore` / `privateKey`), so a vault-backed setup is verifiable at a glance — the address proves which key signed, this proves where it came from. Never the key. ([#33])
+- Preflight checks on every wallet-touching command: `WALLET_NOT_CONFIGURED` and `KEY_REF_PROVIDER_MISSING` now arrive as typed errors with actionable CTAs, instead of escaping as an untyped throw from inside key resolution. The preflight does not resolve the key — that needs an authenticated provider and a round trip, and belongs at use time. ([#33])
+- `wallet init --force`. ([#33])
+
+### Changed
+
+- **`wallet init` no longer silently replaces a configured wallet.** An explicit method used to overwrite whatever was configured, discarding a key that may have been the only copy. It now names what would be lost — the derived address for a private key, the path for a keystore, the reference for a key reference, never the key itself — and asks on a terminal, or fails with `WALLET_ALREADY_CONFIGURED` and a `--force` CTA in agent mode. Re-running the *same* method with the same value replaces nothing and is never blocked. Automation that re-runs `wallet init --auto` expecting a fresh key must now pass `--force`. ([#33])
+- Call-to-action guidance only offers a key-reference method when that provider's CLI is actually installed on the machine — suggesting a tool the caller does not have is a dead end. The reference docs still describe every provider. ([#33])
+
+### Documentation
+
+- `references/key-injection.md` — identification table first (most of the time the answer is "already set up, run normally"), then setup, providers, what the mode does and does not protect, and the error catalog. ([#33])
+- `references/integrations/clawdi-vault.md` — the Clawdi recipe, including the per-project scoping that most often bites. ([#33])
+- `references/keystore-setup.md` now points at the key-reference mode as the automation-safe alternative it previously had no answer for. ([#33])
+
 ## [0.2.0] — 2026-07-23
 
 Agent-hardening release ([#30]), driven by a 609-invocation live smoke campaign on Calibration and a keystore field test. Contains one breaking change (hence the minor bump).
@@ -106,7 +128,8 @@ Initial public release.
 - MCP server mode and the two agent skills (`foc-cli`, `foc-docs`).
 - MCP client compatibility fixes.
 
-[Unreleased]: https://github.com/FIL-Builders/foc-cli/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/FIL-Builders/foc-cli/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/FIL-Builders/foc-cli/releases/tag/v0.3.0
 [0.2.0]: https://github.com/FIL-Builders/foc-cli/releases/tag/v0.2.0
 [0.1.1]: https://www.npmjs.com/package/foc-cli/v/0.1.1
 [0.1.0]: https://www.npmjs.com/package/foc-cli/v/0.1.0
@@ -130,3 +153,4 @@ Initial public release.
 [#28]: https://github.com/FIL-Builders/foc-cli/issues/28
 [#29]: https://github.com/FIL-Builders/foc-cli/issues/29
 [#30]: https://github.com/FIL-Builders/foc-cli/pull/30
+[#33]: https://github.com/FIL-Builders/foc-cli/pull/33
