@@ -272,10 +272,18 @@ mock.module('../src/config.ts', () => ({ default: configStore }))
 // The real isAgent() ORs in !process.stdout.isTTY, which is always true under
 // the test runner — every command context would count as agent mode. Pin it
 // to the context flag so tests can exercise both modes deliberately.
+//
+// canPrompt() needs the same treatment for the same reason: the runner gives
+// the process no TTY on any descriptor, so it would answer "no terminal" for
+// every context and make the two keystore branches indistinguishable. Pinning
+// it to the inverse of the agent flag is what the two mean on a real machine —
+// and keeping them separate here is the point, since conflating them is the
+// bug these mocks are standing in for.
 const realUtils = await import('../src/utils.ts')
 mock.module('../src/utils.ts', () => ({
   ...realUtils,
   isAgent: (c: { agent?: boolean }) => c.agent === true,
+  canPrompt: (c: { agent?: boolean }) => c.agent !== true,
 }))
 
 // Provider availability is a PATH scan in the real module, which would make

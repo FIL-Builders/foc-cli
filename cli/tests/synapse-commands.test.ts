@@ -742,6 +742,119 @@ describe('wallet commands', () => {
     )
   })
 
+  // Re-running the same reference is a documented no-op, and the force guard
+  // agrees — so it never asks. That made an unconditional delete of the scope
+  // silently destructive: the wallet re-resolved against the provider's default
+  // project, which is a different key and therefore a different address.
+  test('wallet init --keyRef keeps the configured project when the reference is unchanged', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'keyRef'
+        ? 'clawdi:FILECOIN_PRIVATE_KEY'
+        : key === 'keyRefProject'
+          ? 'engineering'
+          : undefined
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keyRef: 'clawdi:FILECOIN_PRIVATE_KEY' } })
+    )
+
+    expect(result.status).toBe('configured')
+    expect(configStore.delete).not.toHaveBeenCalledWith('keyRefProject')
+    // And it reports the scope actually in effect, not the absent option.
+    expect(result.keyProject).toBe('engineering')
+  })
+
+  test('wallet init --keyRef drops the old project when the reference changes', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'keyRef'
+        ? 'clawdi:OLD_KEY'
+        : key === 'keyRefProject'
+          ? 'engineering'
+          : undefined
+    )
+
+    await initCommand.run(
+      commandContext({
+        options: { keyRef: 'clawdi:NEW_KEY', force: true },
+      })
+    )
+
+    // A scope belongs to the reference it was set for.
+    expect(configStore.delete).toHaveBeenCalledWith('keyRefProject')
+  })
+
+  test('wallet init --keyRef --keyProject "" clears the scope deliberately', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'keyRef'
+        ? 'clawdi:FILECOIN_PRIVATE_KEY'
+        : key === 'keyRefProject'
+          ? 'engineering'
+          : undefined
+    )
+
+    await initCommand.run(
+      commandContext({
+        options: { keyRef: 'clawdi:FILECOIN_PRIVATE_KEY', keyProject: '' },
+      })
+    )
+
+    expect(configStore.delete).toHaveBeenCalledWith('keyRefProject')
+  })
+
+  // --key-ref sits beside --private-key in help and both take a 0x-ish string.
+  // The envelope for that mix-up travels into the MCP result, the agent's
+  // context and every log downstream, so it must not carry the key.
+  test('wallet init --keyRef never echoes a value that looks like a private key', async () => {
+    const key = `0x${'a'.repeat(64)}`
+
+    const result = await initCommand.run(
+      commandContext({ options: { keyRef: key } })
+    )
+
+    expect(result.error.code).toBe('INVALID_KEY_REF')
+    expect(result.error.message).not.toContain(key)
+    expect(result.error.message).not.toContain('a'.repeat(32))
+    // And it names the flag that was actually meant.
+    expect(result.error.message).toContain('--private-key')
+  })
+
+  test('the already-configured call to action does not replay a key passed as --keyRef', async () => {
+    const key = `0x${'b'.repeat(64)}`
+    configStore.get.mockImplementation((key_: string) =>
+      key_ === 'privateKey' ? `0x${'c'.repeat(64)}` : undefined
+    )
+
+    const result = await initCommand.run(
+      commandContext({ options: { keyRef: key } })
+    )
+
+    expect(result.error.code).toBe('WALLET_ALREADY_CONFIGURED')
+    expect(JSON.stringify(result.cta)).not.toContain('b'.repeat(32))
+  })
+
+  // The one custody mode the already-configured checks could not see: bare
+  // `wallet init` fell past them to the interactive prompt, which writes a
+  // private key and deletes the keystore — replacing a wallet with no --force
+  // and no confirmation.
+  test('wallet init reports a configured keystore as already configured', async () => {
+    configStore.get.mockImplementation((key: string) =>
+      key === 'keystore' ? '/home/user/.foundry/keystores/foc' : undefined
+    )
+
+    const result = await initCommand.run(
+      commandContext({ agent: false, options: {} })
+    )
+
+    expect(result.status).toBe('already_configured')
+    expect(result.path).toBe('/home/user/.foundry/keystores/foc')
+    expect(configStore.set).not.toHaveBeenCalledWith(
+      'privateKey',
+      expect.anything()
+    )
+    expect(configStore.delete).not.toHaveBeenCalledWith('keystore')
+  })
+
   test('wallet deposit parses the amount, deposits with permit, and waits for the transaction', async () => {
     const result = await depositCommand.run(
       commandContext({ args: { amount: '5' } })

@@ -61,6 +61,43 @@ export function providerNames(): string[] {
 }
 
 /**
+ * Distinct 0x + 64 hex values in a helper's output.
+ *
+ * Bounded on both sides, because a loose match is worse than no match here:
+ * every 32-byte value is a valid secp256k1 key, so the first 64 hex digits of a
+ * longer blob would be accepted silently and sign as a completely different
+ * address. Deduplicated so a helper that echoes the value twice does not read
+ * as ambiguous, and returned as a list rather than a verdict so both callers —
+ * the providers below and the `cast` keystore path in client.ts, which scrape
+ * output of exactly the same shape — can refuse an ambiguous result in their
+ * own words. One matcher, because two copies is how one of them stays loose.
+ */
+export function findPrivateKeys(output: string): string[] {
+  return [
+    ...new Set(
+      output.match(/(?<![a-fA-F0-9x])0x[a-fA-F0-9]{64}(?![a-fA-F0-9])/g) ?? []
+    ),
+  ]
+}
+
+/**
+ * A caller-supplied value, made safe to quote back in an error message.
+ *
+ * Diagnostics that echo what was passed have to assume the wrong thing was
+ * passed — and `--key-ref 0x<64 hex>` is the plausible mix-up, since it sits
+ * beside `--private-key` in help and both take a 0x-ish string. An error
+ * envelope travels into the MCP result, the agent's context and every log
+ * downstream, so that one mistake must not be repeated back verbatim.
+ *
+ * Matches more loosely than `findPrivateKeys` on purpose: a key that was
+ * mistyped, truncated or pasted without its prefix is still a secret, and
+ * nothing legitimate on this path is a 32-character run of pure hex.
+ */
+export function redactKeyLike(value: string): string {
+  return value.replace(/(?:0x)?[a-fA-F0-9]{32,}/g, '<redacted>')
+}
+
+/**
  * Split `<provider>:<ref>`. The reference may itself contain colons (clawdi
  * accepts `vault/KEY` and `vault/section/KEY`), so only the first one splits.
  */
@@ -241,17 +278,10 @@ export function resolveKeyRef(keyRef: string, project?: string): string {
 
   // Scrape rather than trust the whole of stdout: helpers add human framing
   // around the value, and the keystore path takes the same approach with cast.
-  //
-  // Bounded on both sides, because a loose match is worse than no match here:
-  // every 32-byte value is a valid secp256k1 key, so the first 64 hex digits of
-  // a longer blob would be accepted silently and sign as a completely different
-  // address. Refusing an ambiguous output is the same reasoning — two candidates
-  // mean the CLI would be guessing which one is the key.
-  const found = [
-    ...new Set(
-      output.match(/(?<![a-fA-F0-9x])0x[a-fA-F0-9]{64}(?![a-fA-F0-9])/g) ?? []
-    ),
-  ]
+  // Refusing an ambiguous output is the same reasoning as the bounded match in
+  // findPrivateKeys — two candidates mean the CLI would be guessing which one
+  // is the key.
+  const found = findPrivateKeys(output)
   if (found.length === 0) {
     throw new Error(
       `${parsed.provider} resolved "${parsed.ref}" but it does not hold a private key (expected 0x + 64 hex, on its own rather than inside a longer value). Check the reference points at the right field — the value is not shown here on purpose.`

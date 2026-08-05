@@ -5,7 +5,7 @@
 ## Requirements
 
 - [Foundry](https://getfoundry.sh) installed (`cast` must be on `PATH`) — the CLI runs `cast w dk` internally.
-- **An interactive terminal.** The password prompt appears at *use* time (the first wallet command, not `wallet init`) and reads from the terminal's tty directly — redirecting stdin does not suppress or feed it. With no tty at all (the MCP server, CI, cron), decryption fails instead of prompting.
+- **An interactive terminal.** The password prompt appears at *use* time (the first wallet command, not `wallet init`) and reads from the terminal's tty directly — redirecting stdin does not suppress or feed it. With no tty at all (the MCP server, CI, cron), decryption fails instead of prompting. Redirecting *output* changes nothing: `wallet balance --json | jq` and `wallet costs > costs.json` still prompt and still work, because a pipe on stdout is not the absence of a terminal.
 
 **Keystore mode is interactive-CLI-only.** A keystore-configured wallet cannot work under the MCP server: there is no tty to prompt on, and no password-in-config option exists (deliberately — it would defeat the encryption). For MCP or any automation, use one of:
 

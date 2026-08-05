@@ -39,6 +39,8 @@ npx foc-cli wallet init --keyRef clawdi:FILECOIN_PRIVATE_KEY --keyProject engine
 
 Pin `--keyProject` whenever the account has more than one project. Adding or changing it on a reference that is already configured is not a replacement — it re-scopes the same lookup — so it needs no `--force`. Never copy a config between machines expecting the reference to mean the same thing.
 
+Once pinned it stays pinned: re-running the same reference without `--keyProject` keeps the scope, and only a change of reference clears it. This matters because an unpinned lookup silently falls back to the account's default project, which can hold a *different* key — and therefore sign from a different address — with nothing on screen to say so. Pass `--keyProject ""` to unpin on purpose.
+
 Nested key paths work as Clawdi writes them — `clawdi:vault/FILECOIN_PRIVATE_KEY`, `clawdi:vault/section/FILECOIN_PRIVATE_KEY`. Only the first colon separates the provider from the reference.
 
 ## Rotation

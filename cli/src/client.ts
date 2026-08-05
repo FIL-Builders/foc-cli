@@ -5,15 +5,19 @@ import { createPublicClient, createWalletClient, type Hex, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import config from './config.ts'
 import {
+  findPrivateKeys,
+  isKnownProvider,
   isOnPath,
   isProviderAvailable,
   keyRefCtaCommands,
   parseKeyRef,
   providerInstallHint,
+  providerNames,
+  redactKeyLike,
   resolveKeyRef,
 } from './key-ref.ts'
 import type { OutputContext } from './output.ts'
-import { expandHome, isAgent } from './utils.ts'
+import { canPrompt, expandHome } from './utils.ts'
 
 type Problem = {
   code: string
@@ -68,12 +72,33 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
     if (!parsed) {
       return {
         code: 'MALFORMED_KEY_REF',
-        message: `The configured key reference (${raw}) is not of the form <provider>:<reference> — e.g. clawdi:FILECOIN_PRIVATE_KEY. Reconfigure it with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
+        // Redacted: a reference that never parsed is most often a private key
+        // passed to --key-ref, and this message is the one place that mistake
+        // would be echoed into a log. The command to fix it says the shape.
+        message: `The configured key reference (${redactKeyLike(raw)}) is not of the form <provider>:<reference> — e.g. clawdi:FILECOIN_PRIVATE_KEY. Reconfigure it with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
         cta: {
           description: 'Reconfigure the reference:',
           commands: keyRefCtaCommands().map((cmd) => ({
             ...cmd,
             // A wallet is configured (badly), so replacing it needs --force.
+            options: { ...cmd.options, force: true },
+          })),
+        },
+      }
+    }
+    // Before the PATH probe, which cannot tell "this provider does not exist"
+    // from "this provider is not installed" — isProviderAvailable() returns
+    // false for both. Reported as the same problem, a typo'd or newer-CLI
+    // prefix becomes a retryable PATH gap, and an agent retries a permanent
+    // misconfiguration forever.
+    if (!isKnownProvider(parsed.provider)) {
+      return {
+        code: 'UNKNOWN_KEY_REF_PROVIDER',
+        message: `The configured key reference names an unknown provider "${parsed.provider}". Supported: ${providerNames().join(', ')}. Reconfigure it with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
+        cta: {
+          description: 'Reconfigure the reference:',
+          commands: keyRefCtaCommands().map((cmd) => ({
+            ...cmd,
             options: { ...cmd.options, force: true },
           })),
         },
@@ -89,11 +114,14 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
       // under an agent, into a destroyed configuration. `retryable` says what
       // is actually true: nothing is wrong with the wallet, try again once the
       // provider is reachable.
-      const install = providerInstallHint(parsed.provider)
+      //
+      // Always present, since the guard above established the provider is
+      // known and every provider defines one.
+      const install = providerInstallHint(parsed.provider) ?? ''
       return {
         code: 'KEY_REF_PROVIDER_MISSING',
         retryable: true,
-        message: `This wallet resolves its key through ${parsed.provider}, which is not on the PATH of this process. ${install ?? ''} If it works in your shell but not here, this process has a shorter PATH — GUI-launched agents and MCP servers usually do. The wallet itself is fine and the reference is intact; nothing needs reconfiguring.`,
+        message: `This wallet resolves its key through ${parsed.provider}, which is not on the PATH of this process. ${install} If it works in your shell but not here, this process has a shorter PATH — GUI-launched agents and MCP servers usually do. The wallet itself is fine and the reference is intact; nothing needs reconfiguring.`,
       }
     }
   }
@@ -102,7 +130,13 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
     // Symmetric with the keyRef checks above: the two ways a keystore is
     // unusable are both knowable without touching the file, and both otherwise
     // surface from `cast` as an untyped throw the command never catches.
-    if (isAgent(c)) {
+    //
+    // canPrompt, not isAgent: the question is whether cast can reach a terminal
+    // for its password, and it reads /dev/tty rather than stdin. isAgent() is
+    // true whenever stdout is not a TTY, so asking it here refused every
+    // keystore command that was piped or redirected — `wallet balance --json |
+    // jq` — on installs where they had always worked.
+    if (!canPrompt(c)) {
       return {
         code: 'KEYSTORE_INTERACTIVE_ONLY',
         message:
@@ -197,19 +231,19 @@ function privateKeyFromConfig() {
   const keystorePath = expandHome(keystore)
   const keystoreDir = dirname(keystorePath)
   const keystoreName = basename(keystorePath)
+  // Only the call is wrapped. Scraping inside the try meant every diagnosis
+  // below also fired for a decrypt that had *succeeded* — a failure to find the
+  // key in cast's output was reported as "Mac Mismatch means the password was
+  // wrong", which is the one thing it is not.
+  let extraction: string
   try {
-    const extraction = execFileSync('cast', [
+    extraction = execFileSync('cast', [
       'w',
       'dk',
       '-k',
       keystoreDir,
       keystoreName,
     ]).toString()
-    const foundAt = extraction.search(/0x[a-fA-F0-9]{64}/)
-    if (foundAt === -1) {
-      throw new Error('Failed to retrieve private key from keystore')
-    }
-    return extraction.slice(foundAt, foundAt + 66)
   } catch (error) {
     // cast's own stderr (password prompt, "Error: Mac Mismatch") passes
     // through to the terminal; this message decodes what that output means
@@ -223,6 +257,24 @@ function privateKeyFromConfig() {
       'Failed to access keystore. "Mac Mismatch" above means the password was wrong. Other causes: an invalid keystore file, or a session with no terminal for the password prompt — keystore mode is interactive-only, so MCP/CI must use a private-key wallet.'
     )
   }
+
+  // The same bounded matcher the key-reference path uses, for the same reason:
+  // an unbounded search would take the first 64 hex digits of a longer blob in
+  // cast's output and sign as a completely different address, and every 32-byte
+  // value is a valid key so nothing downstream would notice. Two scrapes of the
+  // same shape, one matcher.
+  const found = findPrivateKeys(extraction)
+  if (found.length === 0) {
+    throw new Error(
+      "Keystore decrypted, but no private key (0x + 64 hex, on its own rather than inside a longer value) was found in cast's output. Check `cast wallet decrypt-keystore` works on this file directly — the output is not shown here on purpose."
+    )
+  }
+  if (found.length > 1) {
+    throw new Error(
+      `Keystore decrypted to output containing ${found.length} different 0x + 64 hex values, so which one is the key is ambiguous. Use a keystore that holds a single key — the values are not shown here on purpose.`
+    )
+  }
+  return found[0]
 }
 
 export function privateKeyClient(chainId: number) {

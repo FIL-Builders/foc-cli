@@ -41,6 +41,8 @@ npx foc-cli wallet init --keyRef clawdi:FILECOIN_PRIVATE_KEY --keyProject engine
 
 Omit `--keyProject` to use the provider's own default. Setting any other wallet method (`--auto`, `--privateKey`, `--keystore`) clears the reference, and vice versa — only one custody mode is ever active.
 
+A configured scope survives re-running the same reference without `--keyProject`; it is cleared only when the reference itself changes, since a scope belongs to the reference it was set for. To unpin deliberately, pass an empty `--keyProject ""`. The `keyProject` field in the result always reports the scope in effect, not the option that was passed.
+
 **Replacing a configured wallet needs `--force`.** `wallet init` refuses rather than overwrite: on a terminal it asks, and in agent/MCP mode it fails with `WALLET_ALREADY_CONFIGURED` and a CTA repeating the command with `force: true`. The refusal states what actually happens, which differs by mode — replacing a `privateKey` wallet destroys the only copy of that key, while a keystore file stays on disk and a vault key stays in the vault.
 
 Two things are *not* replacements and are never blocked: re-running the same reference, and adding or changing `--keyProject` on a reference that is already configured (it re-scopes the same lookup).
@@ -72,9 +74,10 @@ Wallet-touching commands check the cheap things first — every custody mode, no
 | Code | Meaning |
 |---|---|
 | `WALLET_NOT_CONFIGURED` | No wallet at all. The CTA lists the methods that would work here. |
-| `MALFORMED_KEY_REF` | A reference is configured but is not `<provider>:<reference>`. The CTA repeats the setup command with `force: true`. |
-| `KEY_REF_PROVIDER_MISSING` | A reference is configured but its provider is not on this process's PATH. Marked `retryable`, and deliberately carries **no** command: the wallet is fine, and the fix (install the helper, or launch from a shell that sees it) is outside foc-cli. Do not "fix" it by re-initializing — that throws the working reference away. |
-| `KEYSTORE_INTERACTIVE_ONLY` | A keystore wallet under MCP/automation, where its password prompt can never be answered. |
+| `MALFORMED_KEY_REF` | A reference is configured but is not `<provider>:<reference>`. The CTA repeats the setup command with `force: true`. The offending value is redacted if it looks like a key — the usual cause is a private key passed to `--keyRef`. |
+| `UNKNOWN_KEY_REF_PROVIDER` | The prefix parses but names no provider this CLI version supports — a typo, or a reference copied from a newer CLI. Permanent, so **not** retryable; the message lists the supported providers. |
+| `KEY_REF_PROVIDER_MISSING` | A reference is configured, its provider is recognized, but the helper is not on this process's PATH. Marked `retryable`, and deliberately carries **no** command: the wallet is fine, and the fix (install the helper, or launch from a shell that sees it) is outside foc-cli. Do not "fix" it by re-initializing — that throws the working reference away. |
+| `KEYSTORE_INTERACTIVE_ONLY` | A keystore wallet with no terminal to answer its password prompt on — MCP, or a session with no tty at all. A pipe or redirect is not that: `wallet balance --json \| jq` keeps working, because `cast` reads the password from `/dev/tty`. |
 | `KEYSTORE_TOOL_MISSING` | A keystore wallet, but Foundry `cast` is not on this process's PATH. Retryable; the keystore file is untouched. |
 | `WALLET_ALREADY_CONFIGURED` | `wallet init` would replace the configured wallet. Re-run with `--force`. |
 
@@ -88,4 +91,4 @@ Resolution failures happen later, at use time:
 | `... to output containing N different 0x + 64 hex values` | The field holds more than one key-shaped value, so which one to use is ambiguous. Point the reference at a field holding only the key. |
 | `Malformed key reference in config` | Not `<provider>:<reference>`. Normally caught earlier as `MALFORMED_KEY_REF`. |
 | `Malformed key reference/project in config` | The reference or `--keyProject` contains characters outside `A-Za-z0-9`, space, and `@ _ . : / -`. Everything here reaches a child process's argv — and on Windows, a shell — so the set is restricted on purpose. |
-| `Unknown key-reference provider` | Typo, or a provider this CLI version does not support. |
+| `Unknown key-reference provider` | Typo, or a provider this CLI version does not support. Normally caught earlier as `UNKNOWN_KEY_REF_PROVIDER`. |

@@ -33,13 +33,20 @@ mock.module('../src/config.ts', () => ({
   },
 }))
 
-// The real isAgent() ORs in !process.stdout.isTTY, which is always true under
-// the test runner — every context would count as agent mode, and the two
+// The real isAgent() ORs in !process.stdout.isTTY, and the real canPrompt()
+// requires a TTY on some descriptor — under the test runner neither holds, so
+// every context would count as agent mode with no terminal, and the two
 // keystore branches below would be indistinguishable.
 const realUtils = await import('../src/utils.ts')
+// Captured before the mock installs: mock.module mutates the live namespace
+// object, so reading realUtils.canPrompt afterwards returns the stub and the
+// block at the bottom of this file would be testing itself.
+const realIsAgent = realUtils.isAgent
+const realCanPrompt = realUtils.canPrompt
 mock.module('../src/utils.ts', () => ({
   ...realUtils,
   isAgent: (c: { agent?: boolean }) => c.agent === true,
+  canPrompt: (c: { agent?: boolean }) => c.agent !== true,
 }))
 
 const { requireWallet, walletPreflight } = await import('../src/client.ts')
@@ -134,6 +141,36 @@ describe('walletPreflight — key reference', () => {
     })
   })
 
+  test('an unknown provider is permanent, not a retryable PATH gap', () => {
+    // isProviderAvailable() answers false for "does not exist" and "not
+    // installed" alike, so without a separate check a typo'd prefix — or one
+    // copied from a newer CLI — was reported as KEY_REF_PROVIDER_MISSING with
+    // retryable: true, and an agent retried a permanent misconfiguration
+    // forever against an install hint that did not exist.
+    configValues.keyRef = 'vault:FILECOIN_PRIVATE_KEY'
+    withBins(['clawdi'], () => {
+      const problem = walletPreflight({ agent: true })
+      expect(problem?.code).toBe('UNKNOWN_KEY_REF_PROVIDER')
+      expect(problem?.retryable).toBeUndefined()
+      expect(problem?.message).toContain('clawdi')
+      for (const cmd of problem?.cta.commands ?? []) {
+        expect(cmd.options.force).toBe(true)
+      }
+    })
+  })
+
+  test('a malformed reference is not echoed back when it looks like a key', () => {
+    // The likely cause of a reference with no provider prefix is a private key
+    // passed to --key-ref, and this message lands in the MCP result and the
+    // agent's context.
+    configValues.keyRef = `0x${'a'.repeat(64)}`
+    withBins(['clawdi'], () => {
+      const problem = walletPreflight({ agent: true })
+      expect(problem?.code).toBe('MALFORMED_KEY_REF')
+      expect(problem?.message).not.toContain('a'.repeat(32))
+    })
+  })
+
   test('takes precedence over the other modes, matching key resolution order', () => {
     configValues.keyRef = 'clawdi:FILECOIN_PRIVATE_KEY'
     configValues.keystore = '/tmp/keystore'
@@ -210,6 +247,69 @@ describe('requireWallet', () => {
     withBins([], () => {
       const result: any = requireWallet(c, new OutputContext(c))
       expect(result.retryable).toBe(true)
+    })
+  })
+})
+
+describe('canPrompt — the terminal probe behind keystore mode', () => {
+  /**
+   * The real function, not the mock above: this is the distinction the mock
+   * exists to preserve, so it has to be checked somewhere.
+   *
+   * Keystore mode was gated on isAgent(), which is true whenever stdout is not
+   * a TTY — so `foc-cli wallet balance --json | jq` and `wallet costs >
+   * costs.json` began refusing with KEYSTORE_INTERACTIVE_ONLY on installs where
+   * they had always worked. cast reads the password from /dev/tty; a pipe on
+   * stdout takes nothing away from it.
+   */
+  const streams = {
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+  }
+  const names = ['stdin', 'stdout', 'stderr'] as const
+
+  function withTTYs(
+    ttys: Record<(typeof names)[number], boolean>,
+    run: () => void
+  ) {
+    const saved: Record<string, unknown> = {}
+    for (const name of names) {
+      saved[name] = streams[name].isTTY
+      Object.defineProperty(streams[name], 'isTTY', {
+        value: ttys[name],
+        configurable: true,
+      })
+    }
+    try {
+      run()
+    } finally {
+      for (const name of names) {
+        Object.defineProperty(streams[name], 'isTTY', {
+          value: saved[name],
+          configurable: true,
+        })
+      }
+    }
+  }
+
+  test('a pipe on stdout is not the absence of a terminal', () => {
+    withTTYs({ stdin: true, stdout: false, stderr: true }, () => {
+      // Both readings are correct — they are answers to different questions.
+      expect(realIsAgent({})).toBe(true)
+      expect(realCanPrompt({})).toBe(true)
+    })
+  })
+
+  test('no terminal on any descriptor means nothing can prompt', () => {
+    withTTYs({ stdin: false, stdout: false, stderr: false }, () => {
+      expect(realCanPrompt({})).toBe(false)
+    })
+  })
+
+  test('an explicit agent context can never prompt, terminal or not', () => {
+    withTTYs({ stdin: true, stdout: true, stderr: true }, () => {
+      expect(realCanPrompt({ agent: true })).toBe(false)
     })
   })
 })
