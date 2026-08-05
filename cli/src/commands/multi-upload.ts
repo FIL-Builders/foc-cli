@@ -80,13 +80,8 @@ export const multiUploadCommand = {
   examples: [
     {
       args: { paths: ['./myfile.pdf', './myfile2.pdf'] },
-      options: { copies: 3, withCDN: true },
+      options: { copies: 3 },
       description: 'Upload readable files with auto provider/dataset selection',
-    },
-    {
-      args: { paths: ['./data.bin', './data2.bin'] },
-      options: { withCDN: true },
-      description: 'Upload with CDN',
     },
     {
       args: {
@@ -96,6 +91,9 @@ export const multiUploadCommand = {
       description: 'Upload on mainnet',
     },
   ],
+  // See upload.ts — a `true` option value renders as `--withCDN true`, which the
+  // parser reads as a stray positional. Kept in the hint, which is verbatim.
+  hint: 'Paths are comma-separated and every one must be readable. Add --withCDN to serve through the CDN — a switch, so pass `--withCDN` alone (`--withCDN true` and `--withCDN false` both enable it; use `--withCDN=false` to disable).',
   async run(c: any) {
     const out = new OutputContext(c)
     const blocked = requireWallet(c, out)

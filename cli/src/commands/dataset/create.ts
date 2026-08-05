@@ -35,12 +35,10 @@ export const createCommand = {
   }),
   examples: [
     { args: { providerId: 1 }, description: 'Create dataset with provider #1' },
-    {
-      args: { providerId: 1 },
-      options: { cdn: true },
-      description: 'Create dataset with CDN',
-    },
   ],
+  // --cdn is a switch; `{ cdn: true }` would render as `--cdn true`, and the
+  // parser reads that `true` as a stray positional rather than as the value.
+  hint: 'Add --cdn to enable CDN for the dataset. It is a switch — pass `--cdn` alone, not `--cdn true`.',
   async run(c: any) {
     const out = new OutputContext(c)
     const blocked = requireWallet(c, out)

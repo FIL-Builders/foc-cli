@@ -360,17 +360,19 @@ export const docsCommand = {
   }),
   examples: [
     {
-      options: { prompt: 'upload files' },
+      // Quoted: the value is two words, and an unquoted `--prompt upload files`
+      // searches for "upload" and drops "files" as a stray positional.
+      options: { prompt: '"upload files"' },
       description: 'Find docs about uploading — auto-fetches if few matches',
     },
     {
-      options: { prompt: 'split operations' },
+      options: { prompt: '"split operations"' },
       description: 'Find docs about split/manual upload workflows',
     },
     {
-      options: { prompt: 'getPdpDataSet', deep: true },
+      options: { prompt: 'getPdpDataSet' },
       description:
-        'Search the full sitemap — SDK API reference pages, changelogs',
+        'Find an SDK API reference page — unknown names fall through to the full sitemap',
     },
     {
       options: {
@@ -386,6 +388,7 @@ export const docsCommand = {
       description: 'Fetch a page with full detail (all header depths)',
     },
   ],
+  hint: 'Add --deep to search the full sitemap instead of the curated index. --deep and --debug are switches: pass the flag alone, never `--deep true` (the `true` is read as a stray positional, not as the value).',
   async run(c: any) {
     const out = new OutputContext(c)
     const maxDepth = c.options.maxDepth ?? MAX_HEADER_DEPTH

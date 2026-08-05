@@ -68,13 +68,8 @@ export const uploadCommand = {
   examples: [
     {
       args: { path: './myfile.pdf' },
-      options: { copies: 3, withCDN: true },
+      options: { copies: 3 },
       description: 'Upload with auto provider/dataset selection',
-    },
-    {
-      args: { path: './myfile.pdf' },
-      options: { withCDN: true },
-      description: 'Upload with CDN',
     },
     {
       args: { path: './data.bin' },
@@ -82,6 +77,11 @@ export const uploadCommand = {
       description: 'Upload on mainnet',
     },
   ],
+  // --withCDN cannot be shown in `examples`: incur renders an option whose value
+  // is `true` as `--withCDN true`, and the parser reads that `true` as a stray
+  // positional rather than as the flag's value. Shown here, where the text is
+  // emitted verbatim.
+  hint: 'Add --withCDN to serve the piece through the CDN. It is a switch — pass `--withCDN` alone; `--withCDN true` and `--withCDN false` both enable it, because the value is not read. Use `--withCDN=false` to disable explicitly.',
   async run(c: any) {
     const out = new OutputContext(c)
     const blocked = requireWallet(c, out)
