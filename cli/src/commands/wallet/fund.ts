@@ -1,7 +1,7 @@
 import { claimTokens, formatBalance } from '@filoz/synapse-core/utils'
 import { z } from 'incur'
 import { waitForTransactionReceipt } from 'viem/actions'
-import { walletPreflight } from '../../client.ts'
+import { requireWallet } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
@@ -27,11 +27,8 @@ export const fundCommand = {
   hint: 'Only works on Calibration testnet (chain 314159).',
   async run(c: any) {
     const out = new OutputContext(c)
-    const preflight = walletPreflight()
-    if (preflight)
-      return out.fail(preflight.code, preflight.message, {
-        cta: preflight.cta,
-      })
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client, synapse } = synapseClient(c.options.chain)
 
     try {

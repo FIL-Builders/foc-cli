@@ -300,14 +300,31 @@ const mockKeySource = () =>
         ? 'privateKey'
         : 'none'
 
+// Commands run against a usable wallet unless a test says otherwise — the
+// preflight is a PATH scan over the real machine, which would otherwise decide
+// the outcome of every command test. The guard's own behaviour is covered
+// against the real implementation in preflight.test.ts; what these tests need
+// from it is the ability to make it fire, so a command can be checked for
+// actually consulting it.
+export const walletPreflightMock = mock((_c: { agent?: boolean }): any => null)
+
 mock.module('../src/client.ts', () => ({
   privateKeyClient,
   publicClient,
   // Both read the mocked config store, so they report whatever a test sets up.
   keySource: mockKeySource,
-  // Commands run against a configured wallet unless a test says otherwise;
-  // the preflight's own behaviour is covered directly in key-ref.test.ts.
-  walletPreflight: () => null,
+  walletPreflight: walletPreflightMock,
+  // The real wiring, so a command that calls the guard produces the real
+  // failure envelope rather than a shape only these tests would ever see.
+  requireWallet: (c: { agent?: boolean }, out: any) => {
+    const problem = walletPreflightMock(c)
+    return problem
+      ? out.fail(problem.code, problem.message, {
+          cta: problem.cta,
+          retryable: problem.retryable,
+        })
+      : null
+  },
 }))
 
 mock.module('@filoz/synapse-sdk', () => ({
@@ -378,6 +395,8 @@ export function resetCommandMocks() {
   // Default to a machine with no secret manager installed, so a test that
   // asserts on key-reference guidance has to opt in deliberately.
   availableProvidersMock.mockImplementation(() => [])
+
+  walletPreflightMock.mockImplementation(() => null)
 
   privateKeyClient.mockImplementation(() => ({
     client: fakeWalletClient,

@@ -1,7 +1,7 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { TOKENS } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { keySource, walletPreflight } from '../../client.ts'
+import { keySource, requireWallet } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
@@ -19,9 +19,9 @@ export const balanceCommand = {
   alias: { chain: 'c' },
   output: commandOutput({
     keySource: z
-      .enum(['keyRef', 'keystore', 'privateKey'])
+      .enum(['keyRef', 'keystore', 'privateKey', 'none'])
       .describe(
-        'Where the signing key came from. keyRef: fetched per command from an external secret manager, nothing at rest. keystore: decrypted from a Foundry keystore. privateKey: stored in the config file.'
+        'Where the signing key came from. keyRef: fetched per command from an external secret manager, nothing at rest. keystore: decrypted from a Foundry keystore. privateKey: stored in the config file. none: no wallet configured — unreachable while the preflight runs first, and declared so this schema stays true to what keySource() can return.'
       ),
     address: z.string(),
     fil: z.string(),
@@ -38,11 +38,8 @@ export const balanceCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
-    const preflight = walletPreflight()
-    if (preflight)
-      return out.fail(preflight.code, preflight.message, {
-        cta: preflight.cta,
-      })
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client, synapse } = synapseClient(c.options.chain)
 
     try {

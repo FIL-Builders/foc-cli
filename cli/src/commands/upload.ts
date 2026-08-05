@@ -4,7 +4,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import type { FailedAttempt } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { walletPreflight } from '../client.ts'
+import { requireWallet } from '../client.ts'
 import { commandOutput, OutputContext } from '../output.ts'
 import { selectHealthyProviders } from '../provider-selection.ts'
 import { synapseClient } from '../synapse.ts'
@@ -84,11 +84,8 @@ export const uploadCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
-    const preflight = walletPreflight()
-    if (preflight)
-      return out.fail(preflight.code, preflight.message, {
-        cta: preflight.cta,
-      })
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client, chain, synapse } = synapseClient(c.options.chain)
 
     try {
