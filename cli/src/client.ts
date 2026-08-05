@@ -4,8 +4,73 @@ import { getChain } from '@filoz/synapse-core/chains'
 import { createPublicClient, createWalletClient, type Hex, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import config from './config.ts'
-import { resolveKeyRef } from './key-ref.ts'
+import {
+  availableProviders,
+  isProviderAvailable,
+  parseKeyRef,
+  resolveKeyRef,
+} from './key-ref.ts'
 import { expandHome } from './utils.ts'
+
+type Problem = { code: string; message: string; cta?: any }
+
+/**
+ * Cheap checks that must pass before a command can sign anything.
+ *
+ * Run before constructing a client so an unusable setup fails as a typed,
+ * actionable error instead of escaping as an untyped throw from deep inside
+ * key resolution. Deliberately does not resolve the key: that costs a round
+ * trip and an authenticated provider, and belongs at use time, not here.
+ */
+export function walletPreflight(): Problem | null {
+  const source = keySource()
+
+  if (source === 'none') {
+    const providers = availableProviders()
+    return {
+      code: 'WALLET_NOT_CONFIGURED',
+      message: 'No wallet configured. Run `foc-cli wallet init` to set one up.',
+      cta: {
+        description: 'Choose one:',
+        commands: [
+          {
+            command: 'wallet init',
+            options: { auto: true },
+            description: 'Generate a random key (testnet)',
+          },
+          // Only offered where it would actually work — see availableProviders().
+          ...providers.map((provider) => ({
+            command: 'wallet init',
+            options: { keyRef: `${provider}:FILECOIN_PRIVATE_KEY` },
+            description: `Use a key held in ${provider} (nothing at rest)`,
+          })),
+        ],
+      },
+    }
+  }
+
+  if (source === 'keyRef') {
+    const parsed = parseKeyRef(config.get('keyRef') as string)
+    if (parsed && !isProviderAvailable(parsed.provider)) {
+      return {
+        code: 'KEY_REF_PROVIDER_MISSING',
+        message: `This wallet resolves its key through ${parsed.provider}, which is not installed on this machine. Install it, or reconfigure the wallet with a different method.`,
+        cta: {
+          description: 'Choose one:',
+          commands: [
+            {
+              command: 'wallet init',
+              options: { auto: true, force: true },
+              description: 'Switch to a locally generated key (testnet)',
+            },
+          ],
+        },
+      }
+    }
+  }
+
+  return null
+}
 
 /**
  * Which custody mode is configured, without resolving anything. Safe to call

@@ -1,6 +1,7 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { getPdpDataSets } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
+import { walletPreflight } from '../../client.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
@@ -49,6 +50,11 @@ export const costsCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const preflight = walletPreflight()
+    if (preflight)
+      return out.fail(preflight.code, preflight.message, {
+        cta: preflight.cta,
+      })
     const { client, synapse } = synapseClient(c.options.chain)
 
     try {

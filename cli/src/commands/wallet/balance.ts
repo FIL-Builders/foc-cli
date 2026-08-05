@@ -1,7 +1,7 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { TOKENS } from '@filoz/synapse-sdk'
 import { z } from 'incur'
-import { keySource } from '../../client.ts'
+import { keySource, walletPreflight } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
@@ -38,6 +38,11 @@ export const balanceCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const preflight = walletPreflight()
+    if (preflight)
+      return out.fail(preflight.code, preflight.message, {
+        cta: preflight.cta,
+      })
     const { client, synapse } = synapseClient(c.options.chain)
 
     try {

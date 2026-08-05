@@ -41,6 +41,10 @@ npx foc-cli wallet init --keyRef clawdi:FILECOIN_PRIVATE_KEY --keyProject engine
 
 Omit `--keyProject` to use the provider's own default. Setting any other wallet method (`--auto`, `--privateKey`, `--keystore`) clears the reference, and vice versa — only one custody mode is ever active.
 
+**Replacing a configured wallet needs `--force`.** Switching methods discards the current key, which may be the only copy, so `wallet init` refuses rather than overwrite: on a terminal it asks, and in agent/MCP mode it fails with `WALLET_ALREADY_CONFIGURED` and a CTA repeating the command with `force: true`. Re-running the *same* reference changes nothing and is never blocked.
+
+Configuring a reference before installing the provider is allowed — provisioning often runs in a fixed order. `wallet init` returns `providerAvailable: false` in that case and warns; nothing is at risk until a command signs.
+
 ## Providers
 
 | Provider | Reference form | Setup |
@@ -60,6 +64,16 @@ Each command that touches the wallet costs one resolver call. For a local helper
 ## When it fails
 
 Errors name the fix and never echo what was resolved — a reference pointing at the wrong field must not print that field's contents.
+
+Wallet-touching commands check the cheap things first — that a wallet is configured, and that its provider is installed — so an unusable setup fails as a typed error before anything is resolved:
+
+| Code | Meaning |
+|---|---|
+| `WALLET_NOT_CONFIGURED` | No wallet at all. The CTA lists the methods that would work here. |
+| `KEY_REF_PROVIDER_MISSING` | A reference is configured but its provider is not installed on this machine. |
+| `WALLET_ALREADY_CONFIGURED` | `wallet init` would discard the current key. Re-run with `--force`. |
+
+Resolution failures happen later, at use time:
 
 | Message | Cause → fix |
 |---|---|

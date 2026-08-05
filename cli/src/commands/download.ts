@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
+import { walletPreflight } from '../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../output.ts'
 import { synapseClient } from '../synapse.ts'
 import { pieceScannerUrl } from '../utils.ts'
@@ -67,6 +68,11 @@ export const downloadCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const preflight = walletPreflight()
+    if (preflight)
+      return out.fail(preflight.code, preflight.message, {
+        cta: preflight.cta,
+      })
     const { chain, synapse } = synapseClient(c.options.chain)
 
     let bytes: Uint8Array

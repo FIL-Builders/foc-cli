@@ -44,21 +44,20 @@ FOC turns Filecoin into a **programmable cloud** with four layers:
 
 ## Setup
 
-Rule of thumb: `--auto` for quick start and testnet; `--keyRef` when an agent, MCP, or CI needs a key that must not sit on disk; keystore mode for interactive use of a wallet holding real funds.
+Rule of thumb: `--auto` for quick start, testnet, and agent/automation use; keystore mode when the wallet will hold real funds.
 
 ```bash
 npx foc-cli wallet init --auto              # quick start, testnet, agent/automation
-npx foc-cli wallet init --keyRef <p>:<ref>  # key stays in a secret manager, nothing at rest
 npx foc-cli wallet init --keystore <path>   # real funds: import an encrypted keystore file
 ```
 
 Config file (the `conf` package appends `-nodejs` to the app name): macOS `~/Library/Preferences/foc-cli-nodejs/config.json` · Linux `~/.config/foc-cli-nodejs/config.json` · Windows `%APPDATA%\foc-cli-nodejs\Config\config.json`. Keys: `privateKey`, `keystore`, `keyRef`, `keyRefProject`, `source`.
 
-Only one custody mode is ever active — setting any of them clears the others. `wallet balance --json` reports which one is live as `keySource`, without revealing the key.
+Only one custody mode is active at a time — setting any of them clears the others, and a change that would discard a configured key needs `--force` (or a confirmation on a terminal). `wallet balance --json` reports the live one as `keySource`, without revealing the key.
 
 **Keystore mode**: an encrypted Foundry keystore — the config stores only the path, and the key is decrypted per command via `cast`, which prompts for the password on the terminal. Interactive CLI only: it cannot work under the MCP server or CI (no terminal to prompt on — see MCP Integration). Full setup: [references/keystore-setup.md](references/keystore-setup.md).
 
-**Key-reference mode**: the config stores a `<provider>:<reference>` pointer to a key held in an external secret manager, and the key is fetched into memory per command. Nothing prompts, so unlike keystore mode this works under MCP and CI — with no key at rest anywhere. Full setup and the provider list: [references/key-injection.md](references/key-injection.md).
+If a secret manager already holds the key, `wallet init --keyRef <provider>:<reference>` stores just the pointer and fetches per command — useful for MCP and CI, where keystore mode cannot work. Clawdi is the provider available today; [references/key-injection.md](references/key-injection.md) covers it.
 
 **Private key safety — handle with caution:**
 

@@ -5,6 +5,7 @@ import { Readable } from 'node:stream'
 import type { StorageContext } from '@filoz/synapse-sdk/storage'
 import { z } from 'incur'
 import type { Hex } from 'viem'
+import { walletPreflight } from '../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../output.ts'
 import { selectHealthyProviders } from '../provider-selection.ts'
 import { synapseClient } from '../synapse.ts'
@@ -97,6 +98,11 @@ export const multiUploadCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const preflight = walletPreflight()
+    if (preflight)
+      return out.fail(preflight.code, preflight.message, {
+        cta: preflight.cta,
+      })
     const { client, chain, synapse } = synapseClient(c.options.chain)
 
     try {

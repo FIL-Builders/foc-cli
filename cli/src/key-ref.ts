@@ -67,6 +67,26 @@ export function isKnownProvider(name: string): boolean {
 }
 
 /**
+ * Is this provider's helper actually on PATH? A filesystem probe — no process
+ * is started, nothing is authenticated, no network is touched — so it is cheap
+ * enough to call before offering a provider as an option.
+ */
+export function isProviderAvailable(name: string): boolean {
+  const provider = PROVIDERS[name]
+  return provider ? resolveBin(provider.bin) !== null : false
+}
+
+/**
+ * Providers whose helper is installed here. Used to decide what to *suggest*:
+ * a call to action naming a tool the user does not have is a dead end, so the
+ * CLI only ever offers what would work on this machine. The reference docs
+ * still describe every provider, installed or not.
+ */
+export function availableProviders(): string[] {
+  return providerNames().filter(isProviderAvailable)
+}
+
+/**
  * Find an executable on PATH.
  *
  * `execFileSync` does not apply PATHEXT on Windows, so an npm-installed helper

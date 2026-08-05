@@ -2,7 +2,7 @@ import { schedulePieceDeletion } from '@filoz/synapse-core/sp'
 import { getPdpDataSet } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { waitForTransactionReceipt } from 'viem/actions'
-import { privateKeyClient } from '../../client.ts'
+import { privateKeyClient, walletPreflight } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
@@ -41,6 +41,11 @@ export const removeCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const preflight = walletPreflight()
+    if (preflight)
+      return out.fail(preflight.code, preflight.message, {
+        cta: preflight.cta,
+      })
     const { client, chain } = privateKeyClient(c.options.chain)
 
     try {

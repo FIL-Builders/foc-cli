@@ -1,11 +1,71 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import * as p from '@clack/prompts'
 import { z } from 'incur'
-import { generatePrivateKey } from 'viem/accounts'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import { keySource } from '../../client.ts'
 import config from '../../config.ts'
-import { isKnownProvider, parseKeyRef, providerNames } from '../../key-ref.ts'
+import {
+  availableProviders,
+  isKnownProvider,
+  isProviderAvailable,
+  parseKeyRef,
+  providerNames,
+} from '../../key-ref.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
 import { expandHome, isAgent } from '../../utils.ts'
+
+/**
+ * What an explicit method would destroy, or null when nothing is lost.
+ *
+ * Only a change that actually replaces a credential needs confirming.
+ * Re-running the same `--keyRef` or `--privateKey` is idempotent, and prompting
+ * for it would train agents to pass --force reflexively — which would defeat
+ * the guard entirely.
+ */
+function wouldReplace(options: {
+  auto?: boolean
+  privateKey?: string
+  keystore?: string
+  keyRef?: string
+  keyProject?: string
+}): { source: string; detail?: string } | null {
+  const current = keySource()
+  if (current === 'none') return null
+
+  if (options.keyRef) {
+    const same =
+      config.get('keyRef') === options.keyRef &&
+      (config.get('keyRefProject') ?? undefined) ===
+        (options.keyProject ?? undefined)
+    if (same) return null
+  } else if (options.keystore) {
+    if (config.get('keystore') === expandHome(options.keystore)) return null
+  } else if (options.privateKey) {
+    if (config.get('privateKey') === options.privateKey) return null
+  } else if (!options.auto) {
+    // No explicit method: nothing is replaced.
+    return null
+  }
+  // --auto always mints a fresh key, so it always replaces.
+
+  // Naming what is lost makes the choice concrete. The address is derived, not
+  // secret; a keystore path is already in the config; a reference is safe to
+  // display. The key itself is never shown.
+  if (current === 'privateKey') {
+    try {
+      const address = privateKeyToAccount(
+        config.get('privateKey') as `0x${string}`
+      ).address
+      return { source: 'privateKey', detail: address }
+    } catch {
+      return { source: 'privateKey' }
+    }
+  }
+  if (current === 'keystore') {
+    return { source: 'keystore', detail: config.get('keystore') }
+  }
+  return { source: 'keyRef', detail: config.get('keyRef') }
+}
 
 /**
  * Init is the only moment a bad keystore path is cheap to catch — once it's
@@ -59,6 +119,18 @@ function validateKeystoreFile(
   return null
 }
 
+/**
+ * Key-reference options for a call to action, but only for providers actually
+ * installed here — suggesting a tool the machine does not have is a dead end.
+ */
+function keyRefCtaCommands() {
+  return availableProviders().map((provider) => ({
+    command: 'wallet init',
+    options: { keyRef: `${provider}:FILECOIN_PRIVATE_KEY` },
+    description: `Use a key held in ${provider} (nothing at rest)`,
+  }))
+}
+
 function clearKeyRef() {
   config.delete('keyRef')
   config.delete('keyRefProject')
@@ -100,6 +172,12 @@ export const initCommand = {
       .describe(
         'Source tag reported to Synapse/Warm Storage for telemetry (default: foc-cli)'
       ),
+    force: z
+      .boolean()
+      .optional()
+      .describe(
+        'Replace an already-configured wallet. Without it, a change that would discard an existing key is refused (or confirmed, in an interactive terminal).'
+      ),
   }),
   alias: { auto: 'a' },
   output: commandOutput({
@@ -126,6 +204,12 @@ export const initCommand = {
       .string()
       .optional()
       .describe('Project the reference is scoped to, when one was given'),
+    providerAvailable: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether the key-reference provider is installed here (method: keyRef only). False means the wallet is configured but no command can sign until the provider is installed.'
+      ),
     configPath: z
       .string()
       .optional()
@@ -166,6 +250,47 @@ export const initCommand = {
     const out = new OutputContext(c)
     const agent = isAgent(c)
 
+    // Before anything is written: replacing a configured wallet discards a key
+    // that may be the only copy. An interactive user gets to say no; an agent
+    // gets a typed refusal rather than a silent, unrecoverable overwrite.
+    if (!c.options.force) {
+      const replacing = wouldReplace(c.options)
+      if (replacing) {
+        const describes = replacing.detail
+          ? `${replacing.source} (${replacing.detail})`
+          : replacing.source
+        if (agent) {
+          return out.fail(
+            'WALLET_ALREADY_CONFIGURED',
+            `A wallet is already configured: ${describes}. Replacing it discards the current key, which may be the only copy. Pass --force to proceed.`,
+            {
+              cta: {
+                description: 'Replace it deliberately:',
+                commands: [
+                  {
+                    command: 'wallet init',
+                    options: { ...c.options, force: true },
+                    description: 'Replace the configured wallet',
+                  },
+                ],
+              },
+            }
+          )
+        }
+        const confirmed = await p.confirm({
+          message: `Replace the configured wallet (${describes})? The current key is discarded and cannot be recovered.`,
+          initialValue: false,
+        })
+        if (p.isCancel(confirmed) || !confirmed) {
+          p.cancel('Left the existing wallet in place.')
+          return out.fail(
+            'WALLET_ALREADY_CONFIGURED',
+            'Cancelled — the configured wallet was left in place.'
+          )
+        }
+      }
+    }
+
     if (c.options.source) {
       config.set('source', c.options.source)
     }
@@ -202,8 +327,17 @@ export const initCommand = {
       // a stale key behind would be a key at rest that nothing reads.
       config.delete('privateKey')
       config.delete('keystore')
+      // Configuring before installing the provider is legitimate — image
+      // layers, provisioning scripts, any fixed-order setup. Nothing is at risk
+      // until a command signs, so say so rather than refusing.
+      const providerAvailable = isProviderAvailable(parsed.provider)
       if (!agent) {
         p.log.info(`Key reference: ${c.options.keyRef}`)
+        if (!providerAvailable) {
+          p.log.warn(
+            `${parsed.provider} is not installed here yet — install it before running a command that signs.`
+          )
+        }
         p.outro("You're all set!")
       }
       return out.done({
@@ -211,6 +345,7 @@ export const initCommand = {
         method: 'keyRef',
         keyRef: c.options.keyRef,
         keyProject: c.options.keyProject,
+        providerAvailable,
       })
     }
 
@@ -237,6 +372,7 @@ export const initCommand = {
                   options: { privateKey: '0x...' },
                   description: 'Set key directly',
                 },
+                ...keyRefCtaCommands(),
               ],
             },
           }
@@ -350,11 +486,7 @@ export const initCommand = {
                 options: { privateKey: '0x...' },
                 description: 'Set key directly',
               },
-              {
-                command: 'wallet init',
-                options: { keyRef: 'clawdi:FILECOIN_PRIVATE_KEY' },
-                description: 'Use a key from a secret manager (none at rest)',
-              },
+              ...keyRefCtaCommands(),
             ],
           },
         }

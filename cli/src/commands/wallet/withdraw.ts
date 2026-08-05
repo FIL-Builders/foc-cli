@@ -1,5 +1,6 @@
 import { parseUnits } from '@filoz/synapse-sdk'
 import { z } from 'incur'
+import { walletPreflight } from '../../client.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 import { hashLink, txExplorerUrl } from '../../utils.ts'
@@ -31,6 +32,11 @@ export const withdrawCommand = {
   examples: [{ args: { amount: '1' }, description: 'Withdraw 1 USDFC' }],
   async run(c: any) {
     const out = new OutputContext(c)
+    const preflight = walletPreflight()
+    if (preflight)
+      return out.fail(preflight.code, preflight.message, {
+        cta: preflight.cta,
+      })
     const { chain, synapse } = synapseClient(c.options.chain)
 
     try {

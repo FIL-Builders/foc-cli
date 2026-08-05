@@ -278,18 +278,36 @@ mock.module('../src/utils.ts', () => ({
   isAgent: (c: { agent?: boolean }) => c.agent === true,
 }))
 
+// Provider availability is a PATH scan in the real module, which would make
+// call-to-action assertions depend on whether the test machine happens to have
+// clawdi installed. Tests set this explicitly instead.
+export const availableProvidersMock = mock((): string[] => [])
+
+const realKeyRef = await import('../src/key-ref.ts')
+mock.module('../src/key-ref.ts', () => ({
+  ...realKeyRef,
+  availableProviders: availableProvidersMock,
+  isProviderAvailable: (name: string) =>
+    availableProvidersMock().includes(name),
+}))
+
+const mockKeySource = () =>
+  configStore.get('keyRef')
+    ? 'keyRef'
+    : configStore.get('keystore')
+      ? 'keystore'
+      : configStore.get('privateKey')
+        ? 'privateKey'
+        : 'none'
+
 mock.module('../src/client.ts', () => ({
   privateKeyClient,
   publicClient,
-  // Reads the mocked config store, so it reports whatever a test configures.
-  keySource: () =>
-    configStore.get('keyRef')
-      ? 'keyRef'
-      : configStore.get('keystore')
-        ? 'keystore'
-        : configStore.get('privateKey')
-          ? 'privateKey'
-          : 'none',
+  // Both read the mocked config store, so they report whatever a test sets up.
+  keySource: mockKeySource,
+  // Commands run against a configured wallet unless a test says otherwise;
+  // the preflight's own behaviour is covered directly in key-ref.test.ts.
+  walletPreflight: () => null,
 }))
 
 mock.module('@filoz/synapse-sdk', () => ({
@@ -356,6 +374,10 @@ export function resetCommandMocks() {
   configStore.get.mockImplementation(() => undefined)
   configStore.set.mockImplementation(() => {})
   configStore.delete.mockImplementation(() => {})
+
+  // Default to a machine with no secret manager installed, so a test that
+  // asserts on key-reference guidance has to opt in deliberately.
+  availableProvidersMock.mockImplementation(() => [])
 
   privateKeyClient.mockImplementation(() => ({
     client: fakeWalletClient,
