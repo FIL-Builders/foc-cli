@@ -110,6 +110,15 @@ export function unsafeRefReason(value: string): string | null {
   if (value.startsWith('-')) {
     return `cannot start with "-", which the provider's own CLI would read as an option rather than as a value`
   }
+  // A key is hex, so SAFE_REF alone waves it through — and then it is stored
+  // in a field documented as safe to display, sent to the provider as a lookup
+  // name, and interpolated into every error that names the reference. The
+  // mix-up is the documented one (--key-ref sits beside --private-key and both
+  // take a 0x-ish string), just with the provider prefix included — e.g. a doc
+  // placeholder `clawdi:<reference>` filled in with the key itself.
+  if (/^(?:0x)?[a-fA-F0-9]{64}$/.test(value)) {
+    return 'is a private key rather than a reference to one — a reference names where the key lives, never the key itself. To use a raw key, configure it with `--private-key` instead'
+  }
   if (!SAFE_REF.test(value)) {
     return 'may only contain letters, digits, space, and @ _ . : / - — every character here is passed to another program, so the set is restricted on purpose'
   }
@@ -347,7 +356,10 @@ export function resolveKeyRef(keyRef: string, project?: string): string {
   if (!provider) {
     throw new Errors.IncurError({
       code: 'UNKNOWN_KEY_REF_PROVIDER',
-      message: `Unknown key-reference provider "${parsed.provider}". Supported: ${providerNames().join(', ')}. ${RECONFIGURE}`,
+      // Redacted like the reference below: a key-shaped config value with a
+      // stray colon after it parses as the *provider*, and this message must
+      // not repeat it either.
+      message: `Unknown key-reference provider "${redactKeyLike(parsed.provider)}". Supported: ${providerNames().join(', ')}. ${RECONFIGURE}`,
     })
   }
 
@@ -401,9 +413,14 @@ export function resolveKeyRef(keyRef: string, project?: string): string {
     // Not retryable: the provider ran and said no. Every cause below needs a
     // deliberate act (log in, attach the vault, fix the reference), and an
     // agent that retries instead of acting just burns the session.
+    //
+    // The reference is redacted by shape here and in every message below:
+    // validation refuses a value that IS a key outright, but a key-like run
+    // embedded in a longer reference still passes it, and this envelope
+    // travels into the MCP result, the agent's context and the logs.
     throw new Errors.IncurError({
       code: 'KEY_REF_RESOLUTION_FAILED',
-      message: `Failed to resolve the wallet key from ${parsed.provider} (${parsed.ref}). ${provider.diagnose}`,
+      message: `Failed to resolve the wallet key from ${parsed.provider} (${redactKeyLike(parsed.ref)}). ${provider.diagnose}`,
     })
   }
 
@@ -416,13 +433,13 @@ export function resolveKeyRef(keyRef: string, project?: string): string {
   if (found.length === 0) {
     throw new Errors.IncurError({
       code: 'KEY_REF_NOT_A_KEY',
-      message: `${parsed.provider} resolved "${parsed.ref}" but it does not hold a private key (expected 0x + 64 hex, on its own rather than inside a longer value). Check the reference points at the right field — the value is not shown here on purpose.`,
+      message: `${parsed.provider} resolved "${redactKeyLike(parsed.ref)}" but it does not hold a private key (expected 0x + 64 hex, on its own rather than inside a longer value). Check the reference points at the right field — the value is not shown here on purpose.`,
     })
   }
   if (found.length > 1) {
     throw new Errors.IncurError({
       code: 'KEY_REF_AMBIGUOUS',
-      message: `${parsed.provider} resolved "${parsed.ref}" to output containing ${found.length} different 0x + 64 hex values, so which one is the key is ambiguous. Point the reference at a field that holds only the key — the values are not shown here on purpose.`,
+      message: `${parsed.provider} resolved "${redactKeyLike(parsed.ref)}" to output containing ${found.length} different 0x + 64 hex values, so which one is the key is ambiguous. Point the reference at a field that holds only the key — the values are not shown here on purpose.`,
     })
   }
   return found[0]

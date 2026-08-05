@@ -103,7 +103,9 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
     if (!isKnownProvider(parsed.provider)) {
       return {
         code: 'UNKNOWN_KEY_REF_PROVIDER',
-        message: `The configured key reference names an unknown provider "${parsed.provider}". Supported: ${providerNames().join(', ')}. Reconfigure it with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
+        // Redacted for the same reason as the malformed case above: a
+        // key-shaped value with a stray colon after it parses as the provider.
+        message: `The configured key reference names an unknown provider "${redactKeyLike(parsed.provider)}". Supported: ${providerNames().join(', ')}. Reconfigure it with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
         cta: reconfigureRefCta(),
       }
     }

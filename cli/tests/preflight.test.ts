@@ -203,6 +203,18 @@ describe('walletPreflight — key reference', () => {
     })
   })
 
+  test('a key stored after the provider prefix is caught, and never echoed', () => {
+    // `clawdi:0x<64 hex>` parses, names a known provider, and is pure hex, so
+    // the character allowlist alone waved it through — and the use-time
+    // failure then quoted the reference, i.e. the key, verbatim.
+    configValues.keyRef = `clawdi:0x${'a'.repeat(64)}`
+    withBins(['clawdi'], () => {
+      const problem = walletPreflight({ agent: true })
+      expect(problem?.code).toBe('MALFORMED_KEY_REF')
+      expect(problem?.message).not.toContain('a'.repeat(32))
+    })
+  })
+
   test('a reference the resolver would refuse is caught here, with a way out', () => {
     // Cheap and config-only, so it belongs with the other guard checks: caught
     // here it carries a call to action, whereas at use time it is a bare throw

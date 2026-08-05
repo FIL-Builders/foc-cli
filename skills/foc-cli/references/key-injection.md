@@ -47,7 +47,7 @@ A configured scope survives re-running the same reference without `--keyProject`
 
 Two things are *not* replacements and are never blocked: re-running the same reference, and adding or changing `--keyProject` on a reference that is already configured (it re-scopes the same lookup). `--keyProject` on its own does that re-scoping without restating the reference; on a wallet that uses no reference it is refused with `KEY_PROJECT_WITHOUT_KEY_REF` rather than silently ignored.
 
-A reference or scope that could never resolve — characters outside the allowed set, or a leading `-` the provider's CLI would read as an option — is refused by `wallet init` itself, before anything is written. Init is the only moment that mistake is cheap to catch.
+A reference or scope that could never resolve — characters outside the allowed set, a leading `-` the provider's CLI would read as an option, or a value that is itself a private key rather than a reference to one — is refused by `wallet init` itself, before anything is written. Init is the only moment that mistake is cheap to catch.
 
 Configuring a reference before installing the provider is allowed — provisioning often runs in a fixed order. `wallet init` returns `providerAvailable: false` in that case and warns; nothing is at risk until a command signs.
 
@@ -76,7 +76,7 @@ Wallet-touching commands check the cheap things first — every custody mode, no
 | Code | Meaning |
 |---|---|
 | `WALLET_NOT_CONFIGURED` | No wallet at all. The CTA lists the methods that would work here. |
-| `MALFORMED_KEY_REF` | A reference is configured but is not `<provider>:<reference>`, or it (or `keyRefProject`) holds characters the resolver refuses — including a leading `-`, which the provider's CLI would read as one of its own options. The CTA repeats the setup command with `--force` appended. The offending value is redacted if it looks like a key — the usual cause is a private key passed to `--keyRef`. |
+| `MALFORMED_KEY_REF` | A reference is configured but is not `<provider>:<reference>`, or it (or `keyRefProject`) is a value the resolver refuses — characters outside the allowed set, a leading `-` the provider's CLI would read as one of its own options, or a value that is itself a private key rather than a reference to one. The CTA repeats the setup command with `--force` appended. The offending value is never echoed; key-like runs are redacted everywhere a reference is quoted. The usual cause is a private key passed to `--keyRef`. |
 | `UNKNOWN_KEY_REF_PROVIDER` | The prefix parses but names no provider this CLI version supports — a typo, or a reference copied from a newer CLI. Permanent, so **not** retryable; the message lists the supported providers. |
 | `KEY_REF_PROVIDER_MISSING` | A reference is configured, its provider is recognized, but the helper is not on this process's PATH. Marked `retryable`, and deliberately carries **no** command: the wallet is fine, and the fix (install the helper, or launch from a shell that sees it) is outside foc-cli. Do not "fix" it by re-initializing — that throws the working reference away. |
 | `KEYSTORE_INTERACTIVE_ONLY` | A keystore wallet with no terminal to answer its password prompt on — MCP, or a session with no tty at all. A pipe or redirect is not that: `wallet balance --json \| jq` keeps working, because `cast` reads the password from `/dev/tty`. |

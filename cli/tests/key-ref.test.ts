@@ -196,6 +196,48 @@ describe('resolveKeyRef', () => {
     })
   })
 
+  test('a reference that is itself a private key is refused, and never echoed', () => {
+    // The documented --private-key/--key-ref mix-up with the provider prefix
+    // included — e.g. a doc placeholder `clawdi:<reference>` filled in with
+    // the key. Hex passes SAFE_REF, so without its own rule the key was
+    // stored, sent to the provider as a lookup name, and echoed verbatim into
+    // the use-time error envelope.
+    withFakeClawdi(`echo "${KEY}"`, () => {
+      for (const bad of [KEY, KEY.slice(2)]) {
+        try {
+          resolveKeyRef(`clawdi:${bad}`)
+          throw new Error('expected a throw')
+        } catch (error) {
+          const message = (error as Error).message
+          expect(message).toContain('private key rather than a reference')
+          expect(message).not.toContain('a'.repeat(32))
+        }
+      }
+    })
+  })
+
+  test('a key-like run embedded in a longer reference is redacted from failures', () => {
+    // `vault/0x<64 hex>` is not exactly a key, so validation lets it through —
+    // but whatever hex run it carries must still not ride into the envelope.
+    const run = 'c'.repeat(64)
+    withFakeClawdi('exit 1', () => {
+      try {
+        resolveKeyRef(`clawdi:vault/0x${run}`)
+        throw new Error('expected a throw')
+      } catch (error) {
+        expect((error as Error).message).not.toContain('c'.repeat(32))
+      }
+    })
+    withFakeClawdi('echo "not-a-key"', () => {
+      try {
+        resolveKeyRef(`clawdi:vault/0x${run}`)
+        throw new Error('expected a throw')
+      } catch (error) {
+        expect((error as Error).message).not.toContain('c'.repeat(32))
+      }
+    })
+  })
+
   test('nested reference paths survive the allowlist', () => {
     // The shapes clawdi actually writes must not be collateral damage.
     for (const ref of [
@@ -331,6 +373,12 @@ describe('resolveKeyRef error taxonomy', () => {
     } finally {
       process.env.PATH = previous
     }
+  })
+
+  test('a reference that is itself a key is MALFORMED_KEY_REF', () => {
+    expect(thrownBy(() => resolveKeyRef(`clawdi:${KEY}`)).code).toBe(
+      'MALFORMED_KEY_REF'
+    )
   })
 
   test('a reference pointing at the wrong field is KEY_REF_NOT_A_KEY', () => {

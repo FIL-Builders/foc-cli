@@ -875,6 +875,36 @@ describe('wallet commands', () => {
     expect(configStore.set).not.toHaveBeenCalled()
   })
 
+  // The same mix-up with the provider prefix included: `clawdi:0x<64 hex>`
+  // parses and is pure hex, so the character allowlist alone stored it — a key
+  // at rest under a field documented as safe to display, echoed by every
+  // surface that names the reference.
+  test('a key pasted after the provider prefix is refused, and never echoed', async () => {
+    const key = `0x${'d'.repeat(64)}`
+
+    const result = await initCommand.run(
+      commandContext({ options: { keyRef: `clawdi:${key}` } })
+    )
+
+    expect(result.error.code).toBe('INVALID_KEY_REF')
+    expect(result.error.message).toContain('--private-key')
+    expect(result.error.message).not.toContain('d'.repeat(32))
+    expect(configStore.set).not.toHaveBeenCalled()
+  })
+
+  test('wallet init --keyRef redacts key-like runs from what it reports back', async () => {
+    // Not exactly a key, so it configures — but the hex run it carries must
+    // not ride back in the result, which lands in the MCP envelope.
+    const run = 'e'.repeat(64)
+
+    const result = await initCommand.run(
+      commandContext({ options: { keyRef: `clawdi:vault/0x${run}` } })
+    )
+
+    expect(result.status).toBe('configured')
+    expect(result.keyRef).not.toContain('e'.repeat(32))
+  })
+
   // redactKeyLike matches any 32+ hex run, which is right for hiding a secret
   // and wrong as a test of what the value is. Using it as a classifier told the
   // author of a hex-ish reference to pass it to --private-key, where it fails

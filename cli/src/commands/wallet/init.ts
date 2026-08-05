@@ -519,6 +519,11 @@ export const initCommand = {
     // provider's default project. Its preconditions were checked above.
     if (c.options.keyProject !== undefined && !c.options.keyRef) {
       const currentRef = config.get('keyRef') as string
+      // Redacted like every other place this config value is echoed:
+      // keySource() tests truthiness, so a key hand-edited into `keyRef` still
+      // reports as a reference, and both the log line and the result below
+      // travel into the MCP envelope and the logs.
+      const shownRef = redactKeyLike(currentRef)
       out.step('Scoping key reference')
       // An empty value is how a scope is dropped deliberately — the same
       // convention the --keyRef branch below uses.
@@ -534,15 +539,15 @@ export const initCommand = {
       if (!agent) {
         out.success(
           c.options.keyProject
-            ? `Key reference ${currentRef} is now scoped to project ${c.options.keyProject}.`
-            : `Key reference ${currentRef} is no longer scoped to a project.`
+            ? `Key reference ${shownRef} is now scoped to project ${c.options.keyProject}.`
+            : `Key reference ${shownRef} is no longer scoped to a project.`
         )
         p.outro("You're all set!")
       }
       return out.done({
         status: 'configured',
         method: 'keyRef',
-        keyRef: currentRef,
+        keyRef: shownRef,
         keyProject: config.get('keyRefProject'),
         providerAvailable,
       })
@@ -588,8 +593,13 @@ export const initCommand = {
       // layers, provisioning scripts, any fixed-order setup. Nothing is at risk
       // until a command signs, so say so rather than refusing.
       const providerAvailable = isProviderAvailable(parsed.provider)
+      // Redacted by shape, like the already_configured echo below: validation
+      // refuses a value that IS a key, but a key-like run embedded in a longer
+      // reference still passes it, and both the log line and the result travel
+      // into the MCP envelope and the logs. A no-op for every legitimate value.
+      const shownRef = redactKeyLike(c.options.keyRef)
       if (!agent) {
-        p.log.info(`Key reference: ${c.options.keyRef}`)
+        p.log.info(`Key reference: ${shownRef}`)
         if (!providerAvailable) {
           p.log.warn(
             `${parsed.provider} is not installed here yet — install it before running a command that signs.`
@@ -600,7 +610,7 @@ export const initCommand = {
       return out.done({
         status: 'configured',
         method: 'keyRef',
-        keyRef: c.options.keyRef,
+        keyRef: shownRef,
         // What is configured, not what was passed — a scope carried over from
         // the previous run is still in effect and has to be visible, or the
         // caller reads "no project" off a wallet that is pinned to one.
