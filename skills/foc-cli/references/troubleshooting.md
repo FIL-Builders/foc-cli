@@ -16,10 +16,13 @@ How foc-cli reports failures: every command returns a structured error envelope 
 | Code | Command(s) | Likely causes | Retry? |
 |------|-----------|---------------|--------|
 | `INIT_METHOD_REQUIRED` | `wallet init` (agent mode) | No init method given non-interactively | With `--auto` or `--privateKey` (keystore mode is interactive-only) |
-| `KEYSTORE_INTERACTIVE_ONLY` | `wallet init --keystore` (agent mode) | Keystore mode cannot work under MCP/automation — `cast` prompts for the password on the terminal at use time | No — use `--auto` or `--privateKey` |
+| `KEYSTORE_INTERACTIVE_ONLY` | `wallet init --keystore` (agent mode), and any signing command on a keystore wallet | Keystore mode cannot work under MCP/automation — `cast` prompts for the password on the terminal at use time. Checked before the replacement guard, so you get this on the first call rather than a `WALLET_ALREADY_CONFIGURED` whose CTA replays `--keystore` back into the same refusal | No — use `--auto`, `--privateKey`, or `--keyRef` |
 | `KEYSTORE_NOT_FOUND` | `wallet init --keystore` | Wrong path. Note: `cast wallet new` names files with a random UUID, not the name you expect (see keystore-setup.md) | No — fix the path |
 | `KEYSTORE_INVALID` | `wallet init --keystore` | Path is a directory or other non-regular file, or the file is not an encrypted keystore (no `crypto` object / not JSON). Pass the keystore *file* itself | No — fix the path or create a keystore (keystore-setup.md) |
-| `INVALID_KEY` | `wallet init --privateKey` | Not 0x-prefixed 64-char hex | No — fix the key format |
+| `INVALID_KEY` | `wallet init --privateKey`, and any signing command | Not 0x-prefixed 64-char hex — either the value just passed, or the key already stored in config (hand-edited, truncated by a partial write, migrated from another tool) | No — fix the key format, or re-init with `--force` |
+| `CONFLICTING_INIT_METHODS` | `wallet init` | Two or more of `--auto`, `--privateKey`, `--keystore`, `--keyRef` in one call — only one custody mode can be active, and the command refuses rather than silently picking one | No — pass exactly one |
+| `KEY_REF_TIMED_OUT` | any signing command | The secret manager started but did not answer within 30s: hung network, captive portal, or a helper waiting on input it will never get | Yes (flagged) — check the helper works on its own |
+| `KEYSTORE_TIMED_OUT` | any signing command | `cast` ran but did not finish within 30s — almost always the password prompt with nobody to answer it | Yes (flagged), but the real fix is a private-key or key-reference wallet for automation |
 | `ADDRESS_NOT_ON_CHAIN` | `wallet balance` | Brand-new address with no onchain history yet — every balance is zero | No — fund the address first (`wallet fund` on testnet) |
 | `BALANCE_FETCH_FAILED` | `wallet balance` | RPC hiccup; no wallet configured | Once, if message looks network-y |
 | `FUND_FAILED` | `wallet fund` | Faucet rate-limit or temporarily empty (testnet-only command); RPC hiccup | Later — faucets throttle per-address |
@@ -55,7 +58,7 @@ The generic `*_FAILED` codes carry the real cause in `message`. Patterns to matc
 | Message contains | Meaning | Fix |
 |------------------|---------|-----|
 | `Private key not found` | No wallet configured | `wallet init --auto` (or keystore) |
-| `Failed to access keystore` | `cast` not installed (the message says so explicitly), wrong password (`Mac Mismatch` printed above the error), or no tty for the password prompt (keystore mode is interactive-only — it cannot work under MCP/CI) | Install Foundry / re-enter the password / use a private-key wallet for automation |
+| `Failed to access keystore` | Read the code, not just the text: `KEYSTORE_TOOL_MISSING` means `cast` could not be launched, `KEYSTORE_TIMED_OUT` means it waited on the password prompt with nobody to answer, and `KEYSTORE_DECRYPT_FAILED` is the only one that means the password was wrong (`Mac Mismatch` printed above the error) | Install Foundry / use a private-key or key-reference wallet for automation / re-enter the password |
 | `No reachable storage providers` | All approved providers failed their health check | Transient — the message itself says "retry shortly" |
 | `Insufficient` (balance / available funds / allowance) | USDFC funding problem: wallet balance, unlocked payment-account funds, or operator allowance too low | `wallet balance` → `wallet costs` → `wallet deposit`; `needsFwssMaxApproval: true` in costs output means a one-time operator approval is still needed |
 | `below minimum allowed size` / `exceeds maximum allowed size` | File outside the SDK's upload size bounds (the message states the exact byte limits) | Pad/split the file accordingly |

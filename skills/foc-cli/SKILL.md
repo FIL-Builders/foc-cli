@@ -85,8 +85,9 @@ If anything in this file ever disagrees with the live `-h`/`--schema` output, tr
 ### Flag syntax
 
 - **Spelling:** options are defined in camelCase (`--withCDN`, `--extraBytes`, `--dataSetId`) and this file uses that form. Help's Options block shows auto-generated kebab-case (`--with-c-d-n`, `--extra-bytes`, `--data-set-id`). Both spellings are accepted on every command.
-- **Boolean flags are switches — presence alone enables them.** `--withCDN` means true. Do not pass a space-separated value: in `--withCDN true`, the `true` is read as a positional argument, not as the flag's value (silently ignored at best, consumed as a real argument at worst — even where a help example shows `--flag true`). To pass an explicit value, use the `=` form: `--withCDN=false`.
+- **Boolean flags are switches — presence alone enables them.** `--withCDN` means true. A space-separated value is never read as the flag's value: in both `--withCDN true` and `--withCDN false` the flag is enabled, and the trailing word is left over as a positional argument — dropped silently when the command has no free slot, but consumed as a real argument when it does. `--withCDN false` therefore turns the CDN **on**. To disable explicitly, use the `=` form: `--withCDN=false`.
 - `--flag=value` works for every option type; `--flag value` only for non-boolean options.
+- **Quote multi-word option values.** `--prompt upload files` searches for `upload` and drops `files`; write `--prompt "upload files"`.
 
 ## Chain Configuration
 
@@ -102,15 +103,15 @@ No RPC or env setup is needed: `getChain()` from `@filoz/synapse-core/chains` bu
 
 ## Global Options
 
-All commands accept these — not repeated per-command below:
+`--format`, `--json`, `--schema`, and `-h`/`--help` are accepted by every command. `--chain` and `--debug` are per-command, and a few commands do not define them — passing one there is silently ignored, not an error:
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--chain <id>` / `-c` | `314159` | `314159` = Calibration testnet, `314` = Mainnet |
-| `--debug` | `false` | Verbose error logging with stack traces |
-| `--format <fmt>` | `toon` | Output: `toon`, `json`, `yaml`, `md`, `jsonl` |
-| `--json` | | Shorthand for `--format json` |
-| `-h` / `--help` | | Show help for any command |
+| Option | Default | Description | Not accepted by |
+|--------|---------|-------------|-----------------|
+| `--chain <id>` / `-c` | `314159` | `314159` = Calibration testnet, `314` = Mainnet | `wallet init`, `docs` — neither touches a chain |
+| `--debug` | `false` | Verbose error logging with stack traces | `wallet init`, `wallet balance`, `wallet fund` |
+| `--format <fmt>` | `toon` | Output: `toon`, `json`, `yaml`, `md`, `jsonl` | — |
+| `--json` | | Shorthand for `--format json`. Works on every command, but is not listed in `--help`'s own Global Options block | — |
+| `-h` / `--help` | | Show help for any command | — |
 
 ## Commands
 
@@ -131,7 +132,7 @@ npx foc-cli multi-upload ./a.pdf,./b.pdf         # all paths must be readable
 
 | Command | Description |
 |---------|-------------|
-| `download <pieceCid> [--out <path>] [--withCDN] [--providerAddress <addr>]` | Download a piece by CID. The SDK validates the received bytes against the piece CID before returning; a successful download is itself cryptographic proof that the data is stored, intact, and retrievable, so no separate verify step exists or is needed. Writes to `--out` (default `./<pieceCid>`). Note: the whole piece is buffered in memory before writing — plan accordingly for very large pieces. |
+| `download <pieceCid> [--out <path>] [--withCDN] [--force] [--providerAddress <addr>]` | Download a piece by CID. The SDK validates the received bytes against the piece CID before returning; a successful download is itself cryptographic proof that the data is stored, intact, and retrievable, so no separate verify step exists or is needed. Writes to `--out` (default `./<pieceCid>`), and **refuses to overwrite an existing file** — it fails with `FILE_EXISTS` unless `--force` is passed, so a re-run of the same command is not idempotent by default. Note: the whole piece is buffered in memory before writing — plan accordingly for very large pieces. |
 
 ```bash
 npx foc-cli download baga6ea4seaq... --out ./file.pdf   # retrieve + integrity check in one step
@@ -145,13 +146,13 @@ To acceptance-test a whole dataset, list its piece CIDs via `piece list` or `dat
 
 | Command | Description |
 |---------|-------------|
-| `wallet init [--auto\|--keystore <path>\|--keyRef <provider>:<ref>]` | Initialize wallet (a `--privateKey` flag exists for automation — avoid it; see Private key safety) |
+| `wallet init [--auto\|--keystore <path>\|--keyRef <provider>:<ref>] [--keyProject <name>] [--source <name>] [--force]` | Initialize wallet (a `--privateKey` flag exists for automation — avoid it; see Private key safety). `--keyProject` scopes a `--keyRef` to one project; `--force` is required to replace an already-configured wallet. Takes no `--chain` — it only writes config |
 | `wallet balance` | FIL/USDFC balances + payment account info |
 | `wallet fund` | Testnet faucet (FIL + USDFC) |
 | `wallet deposit <amount>` | Deposit USDFC into payment account |
 | `wallet withdraw <amount>` | Withdraw USDFC from payment account |
 | `wallet summary` | Account summary with funding timeline |
-| `wallet costs --extraBytes N --extraRunway N` | Estimated upload cost (`--copies`, default 2): per-month rate, `depositNeeded`, `alreadyCovered`, and `needsFwssMaxApproval` (true = funds suffice but a one-time operator approval is still required). The upload re-quotes at execution time |
+| `wallet costs --extraBytes N --extraRunway N [--copies N] [--withCDN]` | Estimated upload cost (`--copies`, default 2; `--withCDN` prices CDN-enabled storage for any new datasets). Returns `newPerMonthRate`, `depositNeeded`, `alreadyCovered`, and `needsFwssMaxApproval` (true = funds suffice but a one-time operator approval is still required). The upload re-quotes at execution time |
 
 ### Dataset Management
 
@@ -243,7 +244,16 @@ npx foc-cli mcp add --agent claude-code
 npx foc-cli --mcp                      # start MCP server (stdio)
 ```
 
-Tools use underscores: `wallet_init`, `wallet_balance`, `dataset_list`, `upload`, etc. Tool definitions carry MCP annotations (`readOnlyHint`, `destructiveHint`) — clients can tell reads from fund-moving and destructive operations.
+18 tools are exposed. A subcommand's tool name joins its path with an underscore (`wallet_init`, `wallet_balance`, `dataset_list`, `piece_remove`); a top-level command keeps its own name verbatim — so it is `upload`, `download`, `docs`, and **`multi-upload` with a hyphen**, not `multi_upload`. The full list, verifiable with `npx foc-cli mcp doctor --format json`:
+
+```text
+dataset_create  dataset_details  dataset_list  dataset_terminate  docs
+download        multi-upload     piece_list    piece_remove       provider_list
+upload          wallet_balance   wallet_costs  wallet_deposit     wallet_fund
+wallet_init     wallet_summary   wallet_withdraw
+```
+
+Tool definitions carry MCP annotations (`readOnlyHint`, `destructiveHint`) — clients can tell reads from fund-moving and destructive operations.
 
 **MCP cannot use a keystore.** The MCP server has no terminal, and keystore mode prompts for its password on the tty at use time — so a keystore-configured wallet fails under MCP. Configure with `wallet init --auto`, `wallet init --keyRef <provider>:<ref>`, or `wallet init --privateKey <key>` instead. `--keyRef` is the one that keeps no key at rest ([references/key-injection.md](references/key-injection.md)); keystore mode is for interactive CLI use ([references/keystore-setup.md](references/keystore-setup.md)).
 

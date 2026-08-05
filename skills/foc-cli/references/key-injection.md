@@ -28,7 +28,7 @@ From then on **every command works exactly as it does with a raw key or a keysto
 ```bash
 npx foc-cli wallet balance
 npx foc-cli upload ./blob.json
-npx foc-cli piece list
+npx foc-cli piece list 42        # <dataSetId> is required
 ```
 
 The MCP server works too, with the ordinary registration — unlike keystore mode, nothing prompts.
@@ -41,9 +41,9 @@ npx foc-cli wallet init --keyRef clawdi:FILECOIN_PRIVATE_KEY --keyProject engine
 
 Omit `--keyProject` to use the provider's own default. Setting any other wallet method (`--auto`, `--privateKey`, `--keystore`) clears the reference, and vice versa — only one custody mode is ever active.
 
-A configured scope survives re-running the same reference without `--keyProject`; it is cleared only when the reference itself changes, since a scope belongs to the reference it was set for. To unpin deliberately, pass an empty `--keyProject ""`. The `keyProject` field in the result always reports the scope in effect, not the option that was passed.
+A configured scope survives re-running the same reference without `--keyProject`; it is cleared only when the reference itself changes, since a scope belongs to the reference it was set for. To unpin deliberately, pass an empty `--keyProject ""` — an empty scope means *absent*, not malformed, and resolves against the provider's own default. The `keyProject` field in the result always reports the scope in effect, not the option that was passed.
 
-**Replacing a configured wallet needs `--force`.** `wallet init` refuses rather than overwrite: on a terminal it asks, and in agent/MCP mode it fails with `WALLET_ALREADY_CONFIGURED` and a CTA repeating the command with `force: true`. The refusal states what actually happens, which differs by mode — replacing a `privateKey` wallet destroys the only copy of that key, while a keystore file stays on disk and a vault key stays in the vault.
+**Replacing a configured wallet needs `--force`.** `wallet init` refuses rather than overwrite: on a terminal it asks, and in agent/MCP mode it fails with `WALLET_ALREADY_CONFIGURED` and a CTA repeating the command with `--force` appended. The refusal states what actually happens, which differs by mode — replacing a `privateKey` wallet destroys the only copy of that key, while a keystore file stays on disk and a vault key stays in the vault.
 
 Two things are *not* replacements and are never blocked: re-running the same reference, and adding or changing `--keyProject` on a reference that is already configured (it re-scopes the same lookup). `--keyProject` on its own does that re-scoping without restating the reference; on a wallet that uses no reference it is refused with `KEY_PROJECT_WITHOUT_KEY_REF` rather than silently ignored.
 
@@ -76,14 +76,18 @@ Wallet-touching commands check the cheap things first — every custody mode, no
 | Code | Meaning |
 |---|---|
 | `WALLET_NOT_CONFIGURED` | No wallet at all. The CTA lists the methods that would work here. |
-| `MALFORMED_KEY_REF` | A reference is configured but is not `<provider>:<reference>`, or it (or `keyRefProject`) holds characters the resolver refuses — including a leading `-`, which the provider's CLI would read as one of its own options. The CTA repeats the setup command with `force: true`. The offending value is redacted if it looks like a key — the usual cause is a private key passed to `--keyRef`. |
+| `MALFORMED_KEY_REF` | A reference is configured but is not `<provider>:<reference>`, or it (or `keyRefProject`) holds characters the resolver refuses — including a leading `-`, which the provider's CLI would read as one of its own options. The CTA repeats the setup command with `--force` appended. The offending value is redacted if it looks like a key — the usual cause is a private key passed to `--keyRef`. |
 | `UNKNOWN_KEY_REF_PROVIDER` | The prefix parses but names no provider this CLI version supports — a typo, or a reference copied from a newer CLI. Permanent, so **not** retryable; the message lists the supported providers. |
 | `KEY_REF_PROVIDER_MISSING` | A reference is configured, its provider is recognized, but the helper is not on this process's PATH. Marked `retryable`, and deliberately carries **no** command: the wallet is fine, and the fix (install the helper, or launch from a shell that sees it) is outside foc-cli. Do not "fix" it by re-initializing — that throws the working reference away. |
 | `KEYSTORE_INTERACTIVE_ONLY` | A keystore wallet with no terminal to answer its password prompt on — MCP, or a session with no tty at all. A pipe or redirect is not that: `wallet balance --json \| jq` keeps working, because `cast` reads the password from `/dev/tty`. |
 | `KEYSTORE_TOOL_MISSING` | A keystore wallet, but Foundry `cast` is not on this process's PATH. Retryable; the keystore file is untouched. |
 | `WALLET_ALREADY_CONFIGURED` | `wallet init` would replace the configured wallet. Re-run with `--force`. |
 | `INVALID_KEY_REF` / `INVALID_KEY_PROJECT` | From `wallet init` itself, when the value passed could never resolve. It is refused rather than stored, so the previous wallet is left alone. |
+| `INVALID_KEY` | A private key that is not `0x` + 64 hex — either passed to `--privateKey`, or already sitting in config (hand-edited, truncated by a partial write, migrated from another tool). Caught by the guard rather than left to throw untyped from inside client construction. |
 | `KEY_PROJECT_WITHOUT_KEY_REF` | `--keyProject` on a wallet that uses no key reference. There is nothing for a scope to apply to. |
+| `CONFLICTING_INIT_METHODS` | Two or more of `--auto`, `--privateKey`, `--keystore`, `--keyRef` in one call. Only one custody mode can be active, and the command refuses rather than silently picking one — `--keyRef` used to win, so `--auto --keyRef …` minted no key and left the caller signing with the vault key. |
+
+**Ordering:** `wallet init` judges the whole request before it writes anything — conflicting methods, an unusable value, a keystore that cannot work in this context — and only then applies the replacement guard. So an invalid value is reported on its own terms rather than as `WALLET_ALREADY_CONFIGURED`, you are never asked to add `--force` to a command that was going to be refused anyway, and a refused init leaves the config byte-for-byte as it found it (including `--source`).
 
 Resolution failures happen later, at use time — when the key is actually fetched. They are typed too, so an agent gets a code and a `retryable` flag rather than an untyped `UNKNOWN`:
 
@@ -91,11 +95,13 @@ Resolution failures happen later, at use time — when the key is actually fetch
 |---|---|
 | `KEY_REF_PROVIDER_MISSING` | The provider's CLI is not installed, or not on the PATH of the process running foc-cli (a GUI-launched agent often has a shorter PATH than your shell). **Retryable.** |
 | `KEY_REF_RESOLUTION_FAILED` | The provider ran and refused: not logged in, key missing, or wrong project scope. The message lists the checks for that provider. **Not** retryable — each cause needs a deliberate act, so retrying only burns the session. |
+| `KEY_REF_TIMED_OUT` | The provider started but did not answer within 30s and was stopped — a hung network call, a captive portal, or a helper waiting on input it will never get (foc-cli gives it no stdin). **Retryable.** Without the bound this was not an error at all: the call is synchronous, so it froze the CLI and the whole MCP server indefinitely. |
 | `KEY_REF_NOT_A_KEY` | The reference resolved, but the value is not `0x` + 64 hex standing on its own — it points at the wrong field, or at a field holding a longer blob the key is embedded in. A partial match is never accepted: any 32 bytes form a valid key, so a truncated one would sign as a different address instead of failing. |
 | `KEY_REF_AMBIGUOUS` | The field holds more than one key-shaped value, so which one to use is ambiguous. Point the reference at a field holding only the key. |
 | `MALFORMED_KEY_REF` / `UNKNOWN_KEY_REF_PROVIDER` | The same conditions the guard checks, reached at use time — normally the guard catches them first. |
-| `KEYSTORE_TOOL_MISSING` | Foundry `cast` vanished from PATH between the guard and the decrypt. **Retryable.** |
-| `KEYSTORE_DECRYPT_FAILED` | Wrong password ("Mac Mismatch"), an invalid keystore file, or no terminal for the prompt. |
+| `KEYSTORE_TOOL_MISSING` | Foundry `cast` could not be launched from this process — gone from PATH between the guard and the decrypt, or present but not executable as a process (on Windows, a `cast.cmd` shim Node refuses to launch implicitly). **Retryable.** Distinguished from a wrong password on purpose: a launch failure used to be reported as "Mac Mismatch means the password was wrong" for a wallet that was never opened. |
+| `KEYSTORE_DECRYPT_FAILED` | Wrong password ("Mac Mismatch"), or an invalid keystore file. |
+| `KEYSTORE_TIMED_OUT` | `cast` ran but did not finish within 30s and was stopped — almost always the password prompt with nobody to answer it. **Retryable.** Keystore mode is interactive-only; use a private-key or key-reference wallet for MCP and automation. |
 | `KEYSTORE_NOT_A_KEY` / `KEYSTORE_AMBIGUOUS` | `cast` succeeded but its output held no single key — the same two checks the reference path applies, for the same reason. |
 
 The codes are shared between the guard and use time on purpose: the distinction is an implementation detail, and the fix is identical either way.

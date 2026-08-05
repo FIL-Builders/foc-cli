@@ -29,7 +29,7 @@ When a search narrows to 1-3 matches it **auto-fetches** the top result in the s
 
 ## Command
 
-Before first use, discover the live interface — `npx foc-cli docs -h` and `npx foc-cli docs --schema --format json` — and trust that output over this table. Boolean flags (`--deep`, `--debug`) are presence-only switches: `--deep` enables, `--deep true` does not (the `true` is read as a stray positional).
+Before first use, discover the live interface — `npx foc-cli docs -h` and `npx foc-cli docs --schema --format json` — and trust that output over this table. Boolean flags (`--deep`, `--debug`) are presence-only switches: pass `--deep` alone. The flag's value is never read from the next token, so `--deep true` and `--deep false` **both enable it** and leave the trailing word as a stray positional. Quote multi-word values — `--prompt upload files` searches for `upload` and drops `files`.
 
 ```bash
 npx foc-cli docs [--prompt <text>] [--url <url>] [--maxDepth <n>]
