@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -81,10 +87,16 @@ describe('resolveKeyRef', () => {
   })
 
   test('passes --project through only when one is configured', () => {
-    withFakeClawdi(`echo "args:$* ${KEY}"`, () => {
-      // No project: the provider picks its own default, so no flag is sent.
-      expect(() => resolveKeyRef('clawdi:FILECOIN_PRIVATE_KEY')).not.toThrow()
-    })
+    // The provider refuses the flag rather than ignoring it: a script that
+    // exits 0 whatever argv it gets cannot tell "no --project was sent" from
+    // "one was", so the negative half of this test would assert nothing.
+    withFakeClawdi(
+      `[[ "$*" == *"--project"* ]] && exit 3\necho "${KEY}"`,
+      () => {
+        // No project: the provider picks its own default, so no flag is sent.
+        expect(resolveKeyRef('clawdi:FILECOIN_PRIVATE_KEY')).toBe(KEY)
+      }
+    )
     withFakeClawdi(
       `[[ "$*" == *"--project engineering"* ]] || exit 3\necho "${KEY}"`,
       () => {
@@ -93,6 +105,88 @@ describe('resolveKeyRef', () => {
         ).toBe(KEY)
       }
     )
+  })
+
+  test('a longer hex value is refused, not truncated into a different key', () => {
+    // The dangerous case: every 32-byte value is a valid secp256k1 key, so a
+    // regex that took the first 64 hex digits of a 128-hex blob would return a
+    // perfectly usable key for a completely different address — and the CLI
+    // would sign with it rather than fail.
+    const blob = `0x${'a'.repeat(128)}`
+    withFakeClawdi(`echo "${blob}"`, () => {
+      expect(() => resolveKeyRef('clawdi:PAIR')).toThrow(
+        /does not hold a private key/
+      )
+    })
+  })
+
+  test('a key-shaped value inside a longer token is not mistaken for the key', () => {
+    withFakeClawdi(`echo "trace=deadbeef${KEY.slice(2)}"`, () => {
+      expect(() => resolveKeyRef('clawdi:WRONG_FIELD')).toThrow(
+        /does not hold a private key/
+      )
+    })
+  })
+
+  test('output with two different keys is refused rather than guessed at', () => {
+    const other = `0x${'b'.repeat(64)}`
+    withFakeClawdi(`echo "${KEY}"\necho "${other}"`, () => {
+      try {
+        resolveKeyRef('clawdi:AMBIGUOUS')
+        throw new Error('expected a throw')
+      } catch (error) {
+        const message = (error as Error).message
+        expect(message).toContain('ambiguous')
+        // Same rule as every other failure here: name the problem, never the
+        // values that caused it.
+        expect(message).not.toContain(KEY)
+        expect(message).not.toContain(other)
+      }
+    })
+  })
+
+  test('the same key repeated in framing is still just one key', () => {
+    withFakeClawdi(`echo "${KEY} -> ${KEY}"`, () => {
+      expect(resolveKeyRef('clawdi:FILECOIN_PRIVATE_KEY')).toBe(KEY)
+    })
+  })
+
+  test('a reference with shell metacharacters is rejected before anything runs', () => {
+    // On Windows an npm-installed helper is a .cmd and can only be launched
+    // through cmd.exe, so these values would reach a shell. The allowlist is
+    // what keeps a tampered config from becoming command execution.
+    const canary = join(mkdtempSync(join(tmpdir(), 'foc-canary-')), 'ran')
+    withFakeClawdi(`echo "${KEY}"`, () => {
+      for (const bad of [
+        `KEY" & touch "${canary}`,
+        'KEY$(id)',
+        'KEY`id`',
+        'KEY%PATH%',
+        'KEY|id',
+        'KEY\nid',
+      ]) {
+        expect(() => resolveKeyRef(`clawdi:${bad}`)).toThrow(
+          /Malformed key reference in config/
+        )
+      }
+      expect(() =>
+        resolveKeyRef('clawdi:FILECOIN_PRIVATE_KEY', 'proj & id')
+      ).toThrow(/Malformed key project in config/)
+    })
+    expect(existsSync(canary)).toBe(false)
+  })
+
+  test('nested reference paths survive the allowlist', () => {
+    // The shapes clawdi actually writes must not be collateral damage.
+    for (const ref of [
+      'FILECOIN_PRIVATE_KEY',
+      'vault/FILECOIN_PRIVATE_KEY',
+      'vault/section:odd/KEY',
+    ]) {
+      withFakeClawdi(`echo "${KEY}"`, () => {
+        expect(resolveKeyRef(`clawdi:${ref}`)).toBe(KEY)
+      })
+    }
   })
 
   test('a provider that resolves something that is not a key fails without echoing it', () => {
