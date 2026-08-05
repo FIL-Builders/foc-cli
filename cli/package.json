@@ -1,6 +1,6 @@
 {
   "name": "foc-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI, MCP server, and AI agent skills for Filecoin Onchain Cloud — upload, verify (PDP), and pay for storage on Filecoin with USDFC.",
   "type": "module",
   "main": "dist/src/index.js",

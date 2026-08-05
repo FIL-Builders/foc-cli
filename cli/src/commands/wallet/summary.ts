@@ -2,7 +2,7 @@ import { getAccountSummary } from '@filoz/synapse-core/pay'
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { z } from 'incur'
 import { maxUint256 } from 'viem'
-import { privateKeyClient } from '../../client.ts'
+import { privateKeyClient, requireWallet } from '../../client.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
 
 export const summaryCommand = {
@@ -28,6 +28,8 @@ export const summaryCommand = {
   }),
   async run(c: any) {
     const out = new OutputContext(c)
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client } = privateKeyClient(c.options.chain)
 
     try {

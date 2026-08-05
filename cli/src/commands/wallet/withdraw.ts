@@ -1,5 +1,6 @@
 import { parseUnits } from '@filoz/synapse-sdk'
 import { z } from 'incur'
+import { requireWallet } from '../../client.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 import { hashLink, txExplorerUrl } from '../../utils.ts'
@@ -31,6 +32,8 @@ export const withdrawCommand = {
   examples: [{ args: { amount: '1' }, description: 'Withdraw 1 USDFC' }],
   async run(c: any) {
     const out = new OutputContext(c)
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { chain, synapse } = synapseClient(c.options.chain)
 
     try {

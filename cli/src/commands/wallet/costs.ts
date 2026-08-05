@@ -1,6 +1,7 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { getPdpDataSets } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
+import { requireWallet } from '../../client.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
@@ -49,6 +50,8 @@ export const costsCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client, synapse } = synapseClient(c.options.chain)
 
     try {

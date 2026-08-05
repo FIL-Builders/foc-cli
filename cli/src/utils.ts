@@ -64,3 +64,23 @@ const mcpMode = process.argv.includes('--mcp')
 export function isAgent(c: { agent?: boolean }): boolean {
   return c.agent === true || mcpMode || !process.stdout.isTTY
 }
+
+/**
+ * Is there a terminal something could prompt on?
+ *
+ * Deliberately not `isAgent`. That treats a non-TTY *stdout* as agent mode,
+ * which is right for choosing an output format and wrong for this question:
+ * `foc-cli wallet balance --json | jq` has a pipe on stdout and a terminal on
+ * the other two descriptors. Foundry's `cast` reads a keystore password from
+ * /dev/tty, so it prompts fine there — answering this with isAgent() refuses
+ * every piped or redirected command on an install where they work.
+ *
+ * All three descriptors are checked because any one of them being a terminal
+ * means the process has one; a redirect on stdout alone says nothing.
+ */
+export function canPrompt(c: { agent?: boolean }): boolean {
+  if (c.agent === true || mcpMode) return false
+  return Boolean(
+    process.stdin.isTTY || process.stdout.isTTY || process.stderr.isTTY
+  )
+}

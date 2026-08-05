@@ -1,7 +1,7 @@
 import { getPiecesWithMetadata } from '@filoz/synapse-core/pdp-verifier'
 import { getPdpDataSet } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
-import { privateKeyClient } from '../../client.ts'
+import { privateKeyClient, requireWallet } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, pieceScannerUrl } from '../../utils.ts'
 
@@ -48,6 +48,8 @@ export const listCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client, chain } = privateKeyClient(c.options.chain)
 
     try {

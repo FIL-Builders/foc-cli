@@ -1,6 +1,7 @@
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { TOKENS } from '@filoz/synapse-sdk'
 import { z } from 'incur'
+import { keySource, requireWallet } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
@@ -17,6 +18,11 @@ export const balanceCommand = {
   }),
   alias: { chain: 'c' },
   output: commandOutput({
+    keySource: z
+      .enum(['keyRef', 'keystore', 'privateKey', 'none'])
+      .describe(
+        'Where the signing key came from. keyRef: fetched per command from an external secret manager, nothing at rest. keystore: decrypted from a Foundry keystore. privateKey: stored in the config file. none: no wallet configured — unreachable while the preflight runs first, and declared so this schema stays true to what keySource() can return.'
+      ),
     address: z.string(),
     fil: z.string(),
     usdfc: z.string(),
@@ -32,6 +38,8 @@ export const balanceCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client, synapse } = synapseClient(c.options.chain)
 
     try {
@@ -91,6 +99,9 @@ async function fetchBalances(client: any, synapse: any) {
   const paymentsBalance = await synapse.payments.accountInfo()
 
   return {
+    // Reported so a vault-backed setup is verifiable at a glance: the address
+    // proves which key signed, this proves where it came from. Never the value.
+    keySource: keySource(),
     address: client.account.address,
     fil: formatBalance({ value: filBalance }),
     usdfc: formatBalance({ value: usdfcBalance }),

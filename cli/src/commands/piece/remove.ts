@@ -2,7 +2,7 @@ import { schedulePieceDeletion } from '@filoz/synapse-core/sp'
 import { getPdpDataSet } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { waitForTransactionReceipt } from 'viem/actions'
-import { privateKeyClient } from '../../client.ts'
+import { privateKeyClient, requireWallet } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
@@ -41,6 +41,8 @@ export const removeCommand = {
   ],
   async run(c: any) {
     const out = new OutputContext(c)
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client, chain } = privateKeyClient(c.options.chain)
 
     try {

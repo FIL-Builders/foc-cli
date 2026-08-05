@@ -272,15 +272,67 @@ mock.module('../src/config.ts', () => ({ default: configStore }))
 // The real isAgent() ORs in !process.stdout.isTTY, which is always true under
 // the test runner — every command context would count as agent mode. Pin it
 // to the context flag so tests can exercise both modes deliberately.
+//
+// canPrompt() needs the same treatment for the same reason: the runner gives
+// the process no TTY on any descriptor, so it would answer "no terminal" for
+// every context and make the two keystore branches indistinguishable. Pinning
+// it to the inverse of the agent flag is what the two mean on a real machine —
+// and keeping them separate here is the point, since conflating them is the
+// bug these mocks are standing in for.
 const realUtils = await import('../src/utils.ts')
 mock.module('../src/utils.ts', () => ({
   ...realUtils,
   isAgent: (c: { agent?: boolean }) => c.agent === true,
+  canPrompt: (c: { agent?: boolean }) => c.agent !== true,
 }))
+
+// Provider availability is a PATH scan in the real module, which would make
+// call-to-action assertions depend on whether the test machine happens to have
+// clawdi installed. Tests set this explicitly instead.
+export const availableProvidersMock = mock((): string[] => [])
+
+const realKeyRef = await import('../src/key-ref.ts')
+mock.module('../src/key-ref.ts', () => ({
+  ...realKeyRef,
+  availableProviders: availableProvidersMock,
+  isProviderAvailable: (name: string) =>
+    availableProvidersMock().includes(name),
+}))
+
+const mockKeySource = () =>
+  configStore.get('keyRef')
+    ? 'keyRef'
+    : configStore.get('keystore')
+      ? 'keystore'
+      : configStore.get('privateKey')
+        ? 'privateKey'
+        : 'none'
+
+// Commands run against a usable wallet unless a test says otherwise — the
+// preflight is a PATH scan over the real machine, which would otherwise decide
+// the outcome of every command test. The guard's own behaviour is covered
+// against the real implementation in preflight.test.ts; what these tests need
+// from it is the ability to make it fire, so a command can be checked for
+// actually consulting it.
+export const walletPreflightMock = mock((_c: { agent?: boolean }): any => null)
 
 mock.module('../src/client.ts', () => ({
   privateKeyClient,
   publicClient,
+  // Both read the mocked config store, so they report whatever a test sets up.
+  keySource: mockKeySource,
+  walletPreflight: walletPreflightMock,
+  // The real wiring, so a command that calls the guard produces the real
+  // failure envelope rather than a shape only these tests would ever see.
+  requireWallet: (c: { agent?: boolean }, out: any) => {
+    const problem = walletPreflightMock(c)
+    return problem
+      ? out.fail(problem.code, problem.message, {
+          cta: problem.cta,
+          retryable: problem.retryable,
+        })
+      : null
+  },
 }))
 
 mock.module('@filoz/synapse-sdk', () => ({
@@ -347,6 +399,12 @@ export function resetCommandMocks() {
   configStore.get.mockImplementation(() => undefined)
   configStore.set.mockImplementation(() => {})
   configStore.delete.mockImplementation(() => {})
+
+  // Default to a machine with no secret manager installed, so a test that
+  // asserts on key-reference guidance has to opt in deliberately.
+  availableProvidersMock.mockImplementation(() => [])
+
+  walletPreflightMock.mockImplementation(() => null)
 
   privateKeyClient.mockImplementation(() => ({
     client: fakeWalletClient,

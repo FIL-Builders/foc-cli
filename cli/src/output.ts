@@ -54,6 +54,26 @@ export interface CTA {
 }
 
 /**
+ * Append boolean switches to a CTA command.
+ *
+ * incur renders a `true` option value as a placeholder for a value — `{ force:
+ * true }` comes out as `--force <force>`, which a shell reads as a redirect —
+ * so a switch cannot travel in `options` at all. It has to be part of the
+ * command string. Every CTA that offers `--force`, `--auto`, or any other
+ * switch must route through here, or the escape hatch it hands an agent is not
+ * a runnable command.
+ */
+export function ctaFlags<T extends CTA['commands'][number]>(
+  cmd: T,
+  ...flags: string[]
+): T {
+  return {
+    ...cmd,
+    command: [cmd.command, ...flags.map((f) => `--${f}`)].join(' '),
+  }
+}
+
+/**
  * Stamp the active chain onto every command in a CTA so follow-ups never
  * silently fall back to the default network — a command run with --chain 314
  * must not hand an agent a CTA that quietly targets Calibration. Use only

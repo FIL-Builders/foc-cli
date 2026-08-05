@@ -1,7 +1,7 @@
 import * as sp from '@filoz/synapse-core/sp'
 import { getPDPProvider } from '@filoz/synapse-core/sp-registry'
 import { z } from 'incur'
-import { privateKeyClient } from '../../client.ts'
+import { privateKeyClient, requireWallet } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { datasetScannerUrl, hashLink } from '../../utils.ts'
 
@@ -35,14 +35,14 @@ export const createCommand = {
   }),
   examples: [
     { args: { providerId: 1 }, description: 'Create dataset with provider #1' },
-    {
-      args: { providerId: 1 },
-      options: { cdn: true },
-      description: 'Create dataset with CDN',
-    },
   ],
+  // --cdn is a switch; `{ cdn: true }` would render as `--cdn true`, and the
+  // parser reads that `true` as a stray positional rather than as the value.
+  hint: 'Add --cdn to enable CDN for the dataset. It is a switch — pass `--cdn` alone, not `--cdn true`.',
   async run(c: any) {
     const out = new OutputContext(c)
+    const blocked = requireWallet(c, out)
+    if (blocked) return blocked
     const { client, chain } = privateKeyClient(c.options.chain)
 
     try {
