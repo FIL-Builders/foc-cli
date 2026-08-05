@@ -672,8 +672,12 @@ describe('wallet commands', () => {
 
     expect(result.error.code).toBe('WALLET_ALREADY_CONFIGURED')
     expect(configStore.set).not.toHaveBeenCalled()
-    // The refusal carries the way forward, and names what would be lost.
-    expect(result.cta.commands[0].options.force).toBe(true)
+    // The refusal carries the way forward, and names what would be lost. The
+    // caller's own --auto is replayed alongside --force, and both are switches,
+    // so both live in the command string — as options incur would render them
+    // `--auto <auto> --force <force>`, which is not a runnable command.
+    expect(result.cta.commands[0].command).toBe('wallet init --auto --force')
+    expect(result.cta.commands[0].options).not.toHaveProperty('force')
     expect(result.error.message).toContain('0x70997970')
   })
 
@@ -819,7 +823,11 @@ describe('wallet commands', () => {
     expect(result.error.message).toContain('--private-key')
   })
 
-  test('the already-configured call to action does not replay a key passed as --keyRef', async () => {
+  // A value that could never work is judged before the replacement guard, so
+  // the caller is told what is actually wrong instead of being asked to pass
+  // --force for a command that was going to be refused anyway. Whichever
+  // refusal wins, the key must not appear anywhere in it.
+  test('a key passed as --keyRef is refused on its own terms, and never echoed', async () => {
     const key = `0x${'b'.repeat(64)}`
     configStore.get.mockImplementation((key_: string) =>
       key_ === 'privateKey' ? `0x${'c'.repeat(64)}` : undefined
@@ -829,8 +837,57 @@ describe('wallet commands', () => {
       commandContext({ options: { keyRef: key } })
     )
 
-    expect(result.error.code).toBe('WALLET_ALREADY_CONFIGURED')
-    expect(JSON.stringify(result.cta)).not.toContain('b'.repeat(32))
+    expect(result.error.code).toBe('INVALID_KEY_REF')
+    expect(result.error.message).not.toContain('b'.repeat(32))
+    expect(JSON.stringify(result.cta ?? {})).not.toContain('b'.repeat(32))
+    // Nothing was written on the way to refusing.
+    expect(configStore.set).not.toHaveBeenCalled()
+  })
+
+  // Two methods is a question, not a request, and --keyRef used to answer it by
+  // winning silently: `--auto --keyRef clawdi:K` configured the reference,
+  // minted no key, and reported method 'keyRef', so a caller who asked for a
+  // throwaway testnet key kept signing with the vault key.
+  test('wallet init refuses two custody methods rather than picking one', async () => {
+    const result = await initCommand.run(
+      commandContext({
+        options: { auto: true, keyRef: 'clawdi:FILECOIN_PRIVATE_KEY' },
+      })
+    )
+
+    expect(result.error.code).toBe('CONFLICTING_INIT_METHODS')
+    expect(result.error.message).toContain('--auto')
+    expect(result.error.message).toContain('--key-ref')
+    expect(configStore.set).not.toHaveBeenCalled()
+  })
+
+  // A command that reports failure must leave the config as it found it.
+  // --source was written ahead of every validation branch, so a refused init
+  // still changed the file it said it had not touched.
+  test('wallet init writes nothing at all when it refuses', async () => {
+    const result = await initCommand.run(
+      commandContext({
+        options: { source: 'my-app', keyRef: 'clawdi:MY KEY&touch x' },
+      })
+    )
+
+    expect(result.error.code).toBe('INVALID_KEY_REF')
+    expect(configStore.set).not.toHaveBeenCalled()
+  })
+
+  // redactKeyLike matches any 32+ hex run, which is right for hiding a secret
+  // and wrong as a test of what the value is. Using it as a classifier told the
+  // author of a hex-ish reference to pass it to --private-key, where it fails
+  // again with INVALID_KEY.
+  test('a hex-ish reference is not misreported as a private key', async () => {
+    const result = await initCommand.run(
+      commandContext({
+        options: { keyRef: 'deadbeefdeadbeefdeadbeefdeadbeef' },
+      })
+    )
+
+    expect(result.error.code).toBe('INVALID_KEY_REF')
+    expect(result.error.message).not.toContain('--private-key')
   })
 
   // Init is the only moment this is cheap to catch. Storing it anyway meant
@@ -1999,7 +2056,10 @@ describe('download error taxonomy', () => {
     )
 
     expect(result.error.code).toBe('FILE_EXISTS')
-    expect(result.cta.commands[0].options).toMatchObject({ force: true })
+    // --force is a switch, so it belongs in the command string: as an option
+    // value incur would render it `--force <force>`, which no shell can run.
+    expect(result.cta.commands[0].command).toBe('download --force')
+    expect(result.cta.commands[0].options).not.toHaveProperty('force')
     // The original bytes must be untouched.
     expect((await readFile(existing)).toString()).toBe('precious')
   })

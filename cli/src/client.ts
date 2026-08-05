@@ -10,21 +10,24 @@ import {
   isKnownProvider,
   isOnPath,
   isProviderAvailable,
+  KEY_TOOL_TIMEOUT_MS,
   keyRefCtaCommands,
   parseKeyRef,
   providerInstallHint,
   providerNames,
   redactKeyLike,
   resolveKeyRef,
-  unsafeRefReason,
+  unsafeRefPart,
 } from './key-ref.ts'
-import type { OutputContext } from './output.ts'
+import { type CTA, ctaFlags, type OutputContext } from './output.ts'
 import { canPrompt, expandHome } from './utils.ts'
 
 type Problem = {
   code: string
   message: string
-  cta?: any
+  // The shared CTA type, not `any`: it is what type-checks the suggestions this
+  // file builds, and an untyped `cta` is how `--force <force>` shipped.
+  cta?: CTA
   retryable?: boolean
 }
 
@@ -36,10 +39,7 @@ type Problem = {
 function reconfigureRefCta() {
   return {
     description: 'Reconfigure the reference:',
-    commands: keyRefCtaCommands().map((cmd) => ({
-      ...cmd,
-      options: { ...cmd.options, force: true },
-    })),
+    commands: keyRefCtaCommands().map((cmd) => ctaFlags(cmd, 'force')),
   }
 }
 
@@ -67,8 +67,7 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
         description: 'Choose one:',
         commands: [
           {
-            command: 'wallet init',
-            options: { auto: true },
+            command: 'wallet init --auto',
             description: 'Generate a random key (testnet)',
           },
           // Only offered where it would actually work — see availableProviders().
@@ -112,17 +111,12 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
     // than at use time: a reference or scope holding characters the resolver
     // refuses is a permanent misconfiguration, and catching it here is what
     // gives it a call to action instead of a bare throw mid-command.
-    for (const [what, value] of [
-      ['reference', parsed.ref],
-      ['project', config.get('keyRefProject')],
-    ] as const) {
-      const reason = value === undefined ? null : unsafeRefReason(value)
-      if (reason) {
-        return {
-          code: 'MALFORMED_KEY_REF',
-          message: `Malformed key ${what} in config: it ${reason}. Reconfigure the wallet with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
-          cta: reconfigureRefCta(),
-        }
+    const unsafe = unsafeRefPart(parsed.ref, config.get('keyRefProject'))
+    if (unsafe) {
+      return {
+        code: 'MALFORMED_KEY_REF',
+        message: `Malformed key ${unsafe.what} in config: it ${unsafe.reason}. Reconfigure the wallet with \`foc-cli wallet init --key-ref <provider>:<reference> --force\`.`,
+        cta: reconfigureRefCta(),
       }
     }
     if (!isProviderAvailable(parsed.provider)) {
@@ -166,19 +160,15 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
           description: 'Choose one:',
           commands: [
             {
-              command: 'wallet init',
-              options: { auto: true, force: true },
+              command: 'wallet init --auto --force',
               description: 'Generate a random key (testnet)',
             },
             {
-              command: 'wallet init',
-              options: { privateKey: '0x...', force: true },
+              command: 'wallet init --force',
+              options: { privateKey: '0x...' },
               description: 'Set a key directly',
             },
-            ...keyRefCtaCommands().map((cmd) => ({
-              ...cmd,
-              options: { ...cmd.options, force: true },
-            })),
+            ...keyRefCtaCommands().map((cmd) => ctaFlags(cmd, 'force')),
           ],
         },
       }
@@ -189,6 +179,41 @@ export function walletPreflight(c: { agent?: boolean }): Problem | null {
         retryable: true,
         message:
           'This wallet is a Foundry keystore, and Foundry `cast` — which decrypts it — is not on the PATH of this process. Install Foundry (https://getfoundry.sh), or reconfigure the wallet with `foc-cli wallet init --force`. The keystore file itself is untouched.',
+      }
+    }
+  }
+
+  if (source === 'privateKey') {
+    // The remaining mode, and the one this guard existed to skip. A stored key
+    // that is not 0x + 64 hex — hand-edited, truncated by a partial write,
+    // migrated from another tool — reaches `privateKeyToAccount` inside
+    // `privateKeyClient()`, which every command calls *before* its try block.
+    // That throws a raw viem error, which incur renders as `{ code: 'UNKNOWN' }`
+    // with no code and no `retryable`: precisely the shape this function exists
+    // to remove. Checking it costs nothing and touches no secret.
+    const privateKey = config.get('privateKey') as string
+    if (!/^0x[a-fA-F0-9]{64}$/.test(privateKey)) {
+      return {
+        code: 'INVALID_KEY',
+        // The value is never echoed: it is a key, or something someone believed
+        // was one, and this message travels into the MCP result and the logs.
+        message:
+          'The private key stored in config is not a 0x-prefixed 64-hex-digit key, so it cannot sign. Reconfigure the wallet with `foc-cli wallet init --force`.',
+        cta: {
+          description: 'Choose one:',
+          commands: [
+            {
+              command: 'wallet init --auto --force',
+              description: 'Generate a random key (testnet)',
+            },
+            {
+              command: 'wallet init --force',
+              options: { privateKey: '0x...' },
+              description: 'Set a key directly',
+            },
+            ...keyRefCtaCommands().map((cmd) => ctaFlags(cmd, 'force')),
+          ],
+        },
       }
     }
   }
@@ -260,23 +285,46 @@ function privateKeyFromConfig() {
   // wrong", which is the one thing it is not.
   let extraction: string
   try {
-    extraction = execFileSync('cast', [
-      'w',
-      'dk',
-      '-k',
-      keystoreDir,
-      keystoreName,
-    ]).toString()
+    extraction = execFileSync(
+      'cast',
+      ['w', 'dk', '-k', keystoreDir, keystoreName],
+      {
+        // `cast` reads its password from /dev/tty, so ignoring stdin does not
+        // stop it waiting — and this call is synchronous, so a wait here blocks
+        // the event loop indefinitely. The preflight tries to keep keystore
+        // mode out of contexts with nobody to type, but it answers "is a
+        // terminal attached", not "is a human watching": a harness that inherits
+        // one tty descriptor passes it. The bound is what actually guarantees
+        // the process comes back. Shared with the key-reference helper, which
+        // can block for its own reasons.
+        timeout: KEY_TOOL_TIMEOUT_MS,
+      }
+    ).toString()
   } catch (error) {
     // cast's own stderr (password prompt, "Error: Mac Mismatch") passes
     // through to the terminal; this message decodes what that output means
     // rather than re-reading it.
-    if ((error as { code?: string }).code === 'ENOENT') {
+    //
+    // Symmetric with the key-reference path, which this claimed to mirror and
+    // did not: ENOENT is a vanished binary, EINVAL/ENOEXEC a binary that cannot
+    // be launched at all — on Windows, `resolveBin` happily finds a `cast.cmd`
+    // shim that Node has refused to launch implicitly since CVE-2024-27980.
+    // None of those means cast ran and rejected a password, so none may be
+    // handed the "Mac Mismatch" diagnosis below.
+    const code = (error as { code?: string }).code
+    if (code === 'ENOENT' || code === 'EINVAL' || code === 'ENOEXEC') {
       throw new Errors.IncurError({
         code: 'KEYSTORE_TOOL_MISSING',
         retryable: true,
         message:
-          'Failed to access keystore: Foundry `cast` is not on PATH. Install Foundry (https://getfoundry.sh), or switch to a private-key wallet with `foc-cli wallet init`.',
+          'Failed to access keystore: Foundry `cast` could not be launched from this process. Install Foundry (https://getfoundry.sh) and check it runs as `cast --help`, or switch to a private-key wallet with `foc-cli wallet init --force`.',
+      })
+    }
+    if (code === 'ETIMEDOUT') {
+      throw new Errors.IncurError({
+        code: 'KEYSTORE_TIMED_OUT',
+        retryable: true,
+        message: `Foundry \`cast\` did not finish within ${KEY_TOOL_TIMEOUT_MS / 1000}s while decrypting the keystore, so it was stopped — most often it was waiting on the password prompt with nobody to answer it. Keystore mode is interactive-only; use a private-key or key-reference wallet for MCP and automation.`,
       })
     }
     throw new Errors.IncurError({

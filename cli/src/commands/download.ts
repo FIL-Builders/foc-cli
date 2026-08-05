@@ -62,10 +62,13 @@ export const downloadCommand = {
     },
     {
       args: { pieceCid: 'baga6ea4seaq...' },
-      options: { out: './myfile.pdf', withCDN: true },
-      description: 'Download via CDN to a specific path',
+      options: { out: './myfile.pdf' },
+      description: 'Download to a specific path',
     },
   ],
+  // --withCDN and --force are switches; a `true` option value would render as
+  // `--withCDN true`, whose `true` the parser drops as a stray positional.
+  hint: 'Refuses to overwrite an existing file — re-run with --force to replace it. Add --withCDN to prefer CDN retrieval. Both are switches: pass the flag alone, not `--force true`.',
   async run(c: any) {
     const out = new OutputContext(c)
     const blocked = requireWallet(c, out)
@@ -167,11 +170,12 @@ export const downloadCommand = {
             cta: chainCta(c.options.chain, {
               commands: [
                 {
-                  command: 'download',
+                  // --force is a switch, so it goes in the command string:
+                  // `{ force: true }` would render as `--force <force>`.
+                  command: 'download --force',
                   args: { pieceCid: c.args.pieceCid },
                   options: {
                     ...(c.options.out ? { out: c.options.out } : {}),
-                    force: true,
                   },
                   description: 'Overwrite the existing file',
                 },

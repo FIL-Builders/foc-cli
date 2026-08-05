@@ -69,23 +69,52 @@ function withBins(names: string[], run: () => void) {
   }
 }
 
+/**
+ * The CTA as the caller actually receives it, rendered by incur's own formatter.
+ *
+ * Asserting on the `options` object was what let `--force <force>` ship: incur
+ * renders a `true` option value as a placeholder for a value, so a CTA that
+ * looked right in the source produced a command no shell can run. Render it and
+ * check the string, because the string is the part an agent copies.
+ */
+async function renderedCtaCommands(cta: unknown): Promise<string[]> {
+  // Relative, not bare: incur's package exports do not expose this subpath, and
+  // the point is to run the caller's real formatter rather than a copy of it.
+  const { formatCtaBlock } = await import(
+    '../node_modules/incur/dist/internal/cta.js'
+  )
+  return (formatCtaBlock('foc-cli', cta as never)?.commands ?? []).map(
+    (c: { command: string }) => c.command
+  )
+}
+
+/** Every suggested command must be runnable — no unfilled `<placeholder>`. */
+function expectRunnable(commands: string[]) {
+  expect(commands.length).toBeGreaterThan(0)
+  for (const command of commands) expect(command).not.toMatch(/<[^>]+>/)
+}
+
 beforeEach(() => {
   for (const key of Object.keys(configValues)) delete configValues[key]
 })
 
 describe('walletPreflight — no wallet', () => {
-  test('reports WALLET_NOT_CONFIGURED with a way out', () => {
+  test('reports WALLET_NOT_CONFIGURED with a way out', async () => {
+    let problem: ReturnType<typeof walletPreflight> = null
     withBins([], () => {
-      const problem = walletPreflight({ agent: true })
-      expect(problem?.code).toBe('WALLET_NOT_CONFIGURED')
-      expect(problem?.cta.commands).toEqual([
-        {
-          command: 'wallet init',
-          options: { auto: true },
-          description: 'Generate a random key (testnet)',
-        },
-      ])
+      problem = walletPreflight({ agent: true })
     })
+    expect(problem?.code).toBe('WALLET_NOT_CONFIGURED')
+    expect(problem?.cta?.commands).toEqual([
+      {
+        command: 'wallet init --auto',
+        description: 'Generate a random key (testnet)',
+      },
+    ])
+    // The switch has to survive rendering, not just look right in the source.
+    const rendered = await renderedCtaCommands(problem?.cta)
+    expect(rendered).toEqual(['foc-cli wallet init --auto'])
+    expectRunnable(rendered)
   })
 
   test('offers a key reference only when its provider is installed here', () => {
@@ -108,19 +137,21 @@ describe('walletPreflight — key reference', () => {
     })
   })
 
-  test('a reference with no provider prefix is typed, not left to throw later', () => {
+  test('a reference with no provider prefix is typed, not left to throw later', async () => {
     // Without this branch the config reaches resolveKeyRef, which throws from
     // outside most commands' try block and surfaces as an untyped UNKNOWN.
     configValues.keyRef = 'FILECOIN_PRIVATE_KEY'
+    let problem: ReturnType<typeof walletPreflight> = null
     withBins(['clawdi'], () => {
-      const problem = walletPreflight({ agent: true })
-      expect(problem?.code).toBe('MALFORMED_KEY_REF')
-      // A wallet is configured, so every suggested fix has to carry --force or
-      // it will bounce off WALLET_ALREADY_CONFIGURED.
-      for (const cmd of problem?.cta.commands ?? []) {
-        expect(cmd.options.force).toBe(true)
-      }
+      problem = walletPreflight({ agent: true })
     })
+    expect(problem?.code).toBe('MALFORMED_KEY_REF')
+    // A wallet is configured, so every suggested fix has to carry --force or
+    // it will bounce off WALLET_ALREADY_CONFIGURED — as a switch in the
+    // command, which is the only form that renders runnably.
+    const rendered = await renderedCtaCommands(problem?.cta)
+    expectRunnable(rendered)
+    for (const command of rendered) expect(command).toContain('--force')
   })
 
   test('a missing provider is retryable and suggests nothing destructive', () => {
@@ -141,22 +172,23 @@ describe('walletPreflight — key reference', () => {
     })
   })
 
-  test('an unknown provider is permanent, not a retryable PATH gap', () => {
+  test('an unknown provider is permanent, not a retryable PATH gap', async () => {
     // isProviderAvailable() answers false for "does not exist" and "not
     // installed" alike, so without a separate check a typo'd prefix — or one
     // copied from a newer CLI — was reported as KEY_REF_PROVIDER_MISSING with
     // retryable: true, and an agent retried a permanent misconfiguration
     // forever against an install hint that did not exist.
     configValues.keyRef = 'vault:FILECOIN_PRIVATE_KEY'
+    let problem: ReturnType<typeof walletPreflight> = null
     withBins(['clawdi'], () => {
-      const problem = walletPreflight({ agent: true })
-      expect(problem?.code).toBe('UNKNOWN_KEY_REF_PROVIDER')
-      expect(problem?.retryable).toBeUndefined()
-      expect(problem?.message).toContain('clawdi')
-      for (const cmd of problem?.cta.commands ?? []) {
-        expect(cmd.options.force).toBe(true)
-      }
+      problem = walletPreflight({ agent: true })
     })
+    expect(problem?.code).toBe('UNKNOWN_KEY_REF_PROVIDER')
+    expect(problem?.retryable).toBeUndefined()
+    expect(problem?.message).toContain('clawdi')
+    const rendered = await renderedCtaCommands(problem?.cta)
+    expectRunnable(rendered)
+    for (const command of rendered) expect(command).toContain('--force')
   })
 
   test('a malformed reference is not echoed back when it looks like a key', () => {
@@ -191,6 +223,18 @@ describe('walletPreflight — key reference', () => {
     })
   })
 
+  test('an empty project scope is absent, not malformed', () => {
+    // The provider's argv builder drops a falsy project, so an empty scope
+    // never reaches it. Rejecting it here failed a perfectly usable wallet
+    // with "it may only contain letters, digits, …" for a value that contains
+    // nothing at all — a disagreement between the validator and the builder.
+    configValues.keyRef = 'clawdi:FILECOIN_PRIVATE_KEY'
+    configValues.keyRefProject = ''
+    withBins(['clawdi'], () => {
+      expect(walletPreflight({ agent: true })).toBeNull()
+    })
+  })
+
   test('takes precedence over the other modes, matching key resolution order', () => {
     configValues.keyRef = 'clawdi:FILECOIN_PRIVATE_KEY'
     configValues.keystore = '/tmp/keystore'
@@ -203,17 +247,44 @@ describe('walletPreflight — key reference', () => {
   })
 })
 
-describe('walletPreflight — keystore', () => {
-  test('is rejected under an agent, where its password prompt is unanswerable', () => {
-    configValues.keystore = '/tmp/keystore'
-    withBins(['cast'], () => {
-      const problem = walletPreflight({ agent: true })
-      expect(problem?.code).toBe('KEYSTORE_INTERACTIVE_ONLY')
-      // Every alternative replaces a configured wallet, so all need --force.
-      for (const cmd of problem?.cta.commands ?? []) {
-        expect(cmd.options.force).toBe(true)
-      }
+describe('walletPreflight — stored private key', () => {
+  test('a stored key that is not 0x + 64 hex is typed here, not left to viem', async () => {
+    // The one custody mode the guard used to wave through. An unusable key
+    // reaches privateKeyToAccount inside privateKeyClient(), which every
+    // command calls before its try block — so it surfaced as incur's untyped
+    // `{ code: 'UNKNOWN' }`, the exact shape this guard exists to remove.
+    configValues.privateKey = '0xdeadbeef'
+    let problem: ReturnType<typeof walletPreflight> = null
+    withBins([], () => {
+      problem = walletPreflight({ agent: true })
     })
+    expect(problem?.code).toBe('INVALID_KEY')
+    // Never echoed, even truncated: it is a key, or something someone believed
+    // was one, and this message reaches the MCP result and the logs.
+    expect(problem?.message).not.toContain('deadbeef')
+    expectRunnable(await renderedCtaCommands(problem?.cta))
+  })
+
+  test('a well-formed stored key passes', () => {
+    configValues.privateKey = `0x${'a'.repeat(64)}`
+    withBins([], () => {
+      expect(walletPreflight({ agent: true })).toBeNull()
+    })
+  })
+})
+
+describe('walletPreflight — keystore', () => {
+  test('is rejected under an agent, where its password prompt is unanswerable', async () => {
+    configValues.keystore = '/tmp/keystore'
+    let problem: ReturnType<typeof walletPreflight> = null
+    withBins(['cast'], () => {
+      problem = walletPreflight({ agent: true })
+    })
+    expect(problem?.code).toBe('KEYSTORE_INTERACTIVE_ONLY')
+    // Every alternative replaces a configured wallet, so all need --force.
+    const rendered = await renderedCtaCommands(problem?.cta)
+    expectRunnable(rendered)
+    for (const command of rendered) expect(command).toContain('--force')
   })
 
   test('reports missing Foundry as retryable rather than dying inside cast', () => {

@@ -67,6 +67,31 @@ const PROVIDERS: Record<string, Provider> = {
 const SAFE_REF = /^[A-Za-z0-9 @_.:/][A-Za-z0-9 @_.:/-]*$/
 
 /**
+ * How to fix a broken reference — part of the message, not a `hint`.
+ *
+ * `IncurError` accepts a `hint`, but nothing ever shows it to this caller:
+ * incur's error envelope carries `code`, `message` and `retryable`, and reads
+ * `.hint` only as a *command* hint in help output. A fix written there is
+ * dropped on the floor, so an agent receives "malformed reference" with no way
+ * to act — and, crucially, no `--force`, without which the obvious next command
+ * bounces off WALLET_ALREADY_CONFIGURED and the agent loops. The guard in
+ * client.ts puts the same instruction in its message for the same reason.
+ */
+const RECONFIGURE =
+  'Re-run `foc-cli wallet init --key-ref <provider>:<reference> --force`.'
+
+/**
+ * How long a secret manager gets to answer before the CLI gives up.
+ *
+ * Generous enough for a cold network round trip and an interactive re-auth the
+ * helper handles itself; short enough that a hung one fails rather than wedging
+ * the process forever. Shared with the `cast` keystore decrypt in client.ts —
+ * both are synchronous calls to an external tool that can block indefinitely,
+ * and a limit on one of them is not a limit on the wallet.
+ */
+export const KEY_TOOL_TIMEOUT_MS = 30_000
+
+/**
  * Why this reference or project scope cannot be used — as a clause completing
  * "it …" — or null if the value is fine.
  *
@@ -87,6 +112,36 @@ export function unsafeRefReason(value: string): string | null {
   }
   if (!SAFE_REF.test(value)) {
     return 'may only contain letters, digits, space, and @ _ . : / - — every character here is passed to another program, so the set is restricted on purpose'
+  }
+  return null
+}
+
+/**
+ * Validate a reference and its optional project scope together.
+ *
+ * Both callers apply exactly these rules and report the same code — the guard
+ * in `client.ts` before anything is resolved, and `resolveKeyRef` when the same
+ * config is reached at use time. Two copies of the loop is how the next value
+ * that reaches a provider's argv gets checked in one place and not the other,
+ * invisibly, because both sites look complete. Callers supply their own framing
+ * around the returned clause; only the rules live here.
+ *
+ * An empty scope is *absent*, not malformed. `PROVIDERS.clawdi.args` already
+ * drops a falsy project, so it never reaches argv — rejecting `""` failed a
+ * usable wallet with "it may only contain letters, digits, …" for a value that
+ * contains nothing at all.
+ */
+export function unsafeRefPart(
+  ref: string,
+  project?: string
+): { what: 'reference' | 'project'; reason: string } | null {
+  for (const [what, value] of [
+    ['reference', ref],
+    ['project', project],
+  ] as const) {
+    if (!value) continue
+    const reason = unsafeRefReason(value)
+    if (reason) return { what, reason }
   }
   return null
 }
@@ -285,31 +340,23 @@ export function resolveKeyRef(keyRef: string, project?: string): string {
   if (!parsed) {
     throw new Errors.IncurError({
       code: 'MALFORMED_KEY_REF',
-      message: `Malformed key reference in config: expected "<provider>:<reference>", e.g. clawdi:FILECOIN_PRIVATE_KEY.`,
-      hint: 'Re-run `foc-cli wallet init --key-ref <provider>:<reference> --force`.',
+      message: `Malformed key reference in config: expected "<provider>:<reference>", e.g. clawdi:FILECOIN_PRIVATE_KEY. ${RECONFIGURE}`,
     })
   }
   const provider = PROVIDERS[parsed.provider]
   if (!provider) {
     throw new Errors.IncurError({
       code: 'UNKNOWN_KEY_REF_PROVIDER',
-      message: `Unknown key-reference provider "${parsed.provider}". Supported: ${providerNames().join(', ')}.`,
-      hint: 'Re-run `foc-cli wallet init --key-ref <provider>:<reference> --force`.',
+      message: `Unknown key-reference provider "${parsed.provider}". Supported: ${providerNames().join(', ')}. ${RECONFIGURE}`,
     })
   }
 
-  for (const [what, value] of [
-    ['reference', parsed.ref],
-    ['project', project],
-  ] as const) {
-    const reason = value === undefined ? null : unsafeRefReason(value)
-    if (reason) {
-      throw new Errors.IncurError({
-        code: 'MALFORMED_KEY_REF',
-        message: `Malformed key ${what} in config: it ${reason}.`,
-        hint: 'Re-run `foc-cli wallet init --key-ref <provider>:<reference> --force`.',
-      })
-    }
+  const unsafe = unsafeRefPart(parsed.ref, project)
+  if (unsafe) {
+    throw new Errors.IncurError({
+      code: 'MALFORMED_KEY_REF',
+      message: `Malformed key ${unsafe.what} in config: it ${unsafe.reason}. ${RECONFIGURE}`,
+    })
   }
 
   const bin = resolveBin(provider.bin)
@@ -338,6 +385,17 @@ export function resolveKeyRef(keyRef: string, project?: string): string {
         code: 'KEY_REF_PROVIDER_MISSING',
         retryable: true,
         message: `Failed to resolve the wallet key: ${provider.install}`,
+      })
+    }
+    // Timed out rather than refused, so the "not logged in / wrong project"
+    // diagnosis below would be a guess about a helper that never answered.
+    // Retryable: the usual causes — a cold network, a hung connection, a
+    // helper waiting on input it will never get — are transient.
+    if (code === 'ETIMEDOUT') {
+      throw new Errors.IncurError({
+        code: 'KEY_REF_TIMED_OUT',
+        retryable: true,
+        message: `${parsed.provider} did not respond within ${KEY_TOOL_TIMEOUT_MS / 1000}s while resolving the wallet key, so it was stopped. Check it works on its own (\`${provider.bin} --help\`) and that this machine can reach it; a helper waiting on a prompt cannot be answered from here, since foc-cli gives it no stdin.`,
       })
     }
     // Not retryable: the provider ran and said no. Every cause below needs a
@@ -395,6 +453,13 @@ function execProvider(bin: string, args: string[]): string {
       // decides to prompt would hang the CLI (and the MCP server) forever.
       stdio: ['ignore', 'pipe', 'inherit'],
       shell: batch,
+      // Ignoring stdin is not enough on its own. A helper can still block on a
+      // network call the OS never times out (a hung TCP connection, a captive
+      // portal), or read /dev/tty directly the way `cast` does — and this call
+      // is synchronous, so a block here freezes the event loop: the MCP server
+      // cannot answer another request, report progress, or honour a cancel.
+      // A bounded wait turns that into a typed, retryable failure.
+      timeout: KEY_TOOL_TIMEOUT_MS,
     }
   )
 }

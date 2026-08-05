@@ -11,6 +11,7 @@ import {
   parseKeyRef,
   providerNames,
   redactKeyLike,
+  unsafeRefPart,
   unsafeRefReason,
 } from '../../key-ref.ts'
 import { commandOutput, OutputContext } from '../../output.ts'
@@ -82,7 +83,13 @@ function wouldReplace(options: {
   }
   return {
     source: 'keyRef',
-    detail: config.get('keyRef'),
+    // A reference is safe to display — unless it is not one. `keySource()`
+    // tests truthiness, so a key-shaped value hand-edited into `keyRef` still
+    // reports as a reference, and this string is interpolated into the
+    // WALLET_ALREADY_CONFIGURED message that travels into the MCP result, the
+    // agent's context and every log downstream. `walletPreflight` redacts the
+    // same field for the same reason; this is the other place it is read.
+    detail: redactKeyLike(config.get('keyRef') as string),
     consequence:
       'The key stays in the secret manager and can be referenced again; this install just stops using the reference.',
   }
@@ -141,16 +148,23 @@ function validateKeystoreFile(
 }
 
 /**
- * The caller's own options, replayed for a call to action — minus the secret.
+ * The caller's own command, replayed for a call to action — minus the secret.
  *
  * An allowlist, not a redaction pass: an error envelope travels into the MCP
  * result, the agent's context and every log downstream, so `--privateKey` must
  * never ride along with it. The placeholder keeps the CTA shaped like a command
  * the caller can run, while making it obvious the value has to be re-supplied.
+ *
+ * Switches are returned in the command string, not in `options`, because incur
+ * renders `{ force: true }` as `--force <force>` — see ctaFlags. This CTA exists
+ * only to hand back a runnable `--force` command, so getting that wrong would
+ * defeat the whole refusal.
  */
-function replayOptions(options: Record<string, any>) {
+function replayCommand(options: Record<string, any>) {
   const safe: Record<string, any> = {}
-  for (const key of ['auto', 'keystore', 'keyRef', 'keyProject', 'source']) {
+  const flags: string[] = []
+  if (options.auto !== undefined) flags.push('auto')
+  for (const key of ['keystore', 'keyRef', 'keyProject', 'source']) {
     if (options[key] !== undefined) safe[key] = options[key]
   }
   if (options.privateKey !== undefined) safe.privateKey = '0x...'
@@ -159,8 +173,11 @@ function replayOptions(options: Record<string, any>) {
   // field that is documented as safe to display, so scrub by shape as well as
   // by name.
   if (typeof safe.keyRef === 'string') safe.keyRef = redactKeyLike(safe.keyRef)
-  safe.force = true
-  return safe
+  flags.push('force')
+  return {
+    command: ['wallet init', ...flags.map((f) => `--${f}`)].join(' '),
+    options: safe,
+  }
 }
 
 function clearKeyRef() {
@@ -253,7 +270,6 @@ export const initCommand = {
   }),
   examples: [
     { description: 'Interactive key entry' },
-    { options: { auto: true }, description: 'Generate random key' },
     {
       options: { keystore: '~/.foundry/keystores/alice' },
       description: 'Use Foundry keystore',
@@ -263,8 +279,8 @@ export const initCommand = {
       description: 'Set private key directly',
     },
     {
-      options: { auto: true, source: 'my-app' },
-      description: 'Generate a key and set the source tag',
+      options: { source: 'my-app' },
+      description: 'Set the source tag on an existing wallet',
     },
     {
       options: { keyRef: 'clawdi:FILECOIN_PRIVATE_KEY' },
@@ -278,9 +294,177 @@ export const initCommand = {
       description: 'Same, scoped to one project instead of the default',
     },
   ],
+  // --auto and --force are switches, and incur renders a `true` option value as
+  // `--auto true` — whose `true` the parser drops as a stray positional. Both
+  // belong here, where the text is emitted verbatim.
+  hint: 'Generate a random key with `foc-cli wallet init --auto` (add --source <name> to set the telemetry tag at the same time). --auto and --force are switches: pass the flag alone, not `--auto true`. Replacing a configured wallet needs --force.',
   async run(c: any) {
     const out = new OutputContext(c)
     const agent = isAgent(c)
+
+    // ---- Judge the whole request before writing anything. -----------------
+    //
+    // Two rules this ordering enforces. A command that reports failure must
+    // leave the config exactly as it found it — `--source` used to be written
+    // ahead of every check below, so a refused init still changed the file it
+    // said it had not touched. And a method that cannot work here is refused on
+    // the first call rather than after a round trip through the replacement
+    // guard, whose call to action would otherwise replay the very option that
+    // is about to be rejected.
+
+    // Exactly one custody mode, or none. --keyRef used to win silently over the
+    // rest: `wallet init --auto --keyRef clawdi:K` configured the reference,
+    // minted no key, and reported `method: 'keyRef'` — so a caller who asked
+    // for a throwaway testnet key kept signing with the vault key instead. The
+    // --key-project branch below already refuses its own version of this
+    // question rather than answering it by quietly picking one.
+    const methods = [
+      c.options.auto ? '--auto' : null,
+      c.options.privateKey ? '--private-key' : null,
+      c.options.keystore ? '--keystore' : null,
+      c.options.keyRef ? '--key-ref' : null,
+    ].filter((m): m is string => m !== null)
+    if (methods.length > 1) {
+      return out.fail(
+        'CONFLICTING_INIT_METHODS',
+        `${methods.join(' and ')} each configure a different custody mode, and only one can be active at a time. Pass exactly one.`
+      )
+    }
+
+    // Before the replacement guard on purpose: in agent mode a keystore is
+    // refused whatever else is true, so letting WALLET_ALREADY_CONFIGURED go
+    // first cost a round trip and handed back a CTA repeating --keystore, which
+    // this branch was guaranteed to reject on the retry.
+    //
+    // canPrompt, not isAgent, and for the same reason as the preflight in
+    // client.ts: a piped or redirected stdout is not the absence of a terminal,
+    // and refusing on it would block `wallet init --keystore ... | tee
+    // setup.log` on a machine where the keystore works perfectly well.
+    let keystorePath: string | null = null
+    if (c.options.keystore) {
+      if (!canPrompt(c)) {
+        return out.fail(
+          'KEYSTORE_INTERACTIVE_ONLY',
+          'Keystore mode prompts for its password on the terminal at use time, so it cannot work from MCP or automation. Configure a private-key or key-reference wallet instead.',
+          {
+            cta: {
+              description: 'Choose one:',
+              commands: [
+                {
+                  command: 'wallet init --auto',
+                  description: 'Generate random key',
+                },
+                {
+                  command: 'wallet init',
+                  options: { privateKey: '0x...' },
+                  description: 'Set key directly',
+                },
+                ...keyRefCtaCommands(),
+              ],
+            },
+          }
+        )
+      }
+      // Expand ~ ourselves so '~/.foundry/keystores/foc' works even when the
+      // shell didn't get a chance to (e.g. quoted paths).
+      keystorePath = expandHome(c.options.keystore)
+      const problem = validateKeystoreFile(keystorePath)
+      if (problem) return out.fail(problem.code, problem.message)
+    }
+
+    let parsedRef: { provider: string; ref: string } | null = null
+    if (c.options.keyRef) {
+      parsedRef = parseKeyRef(c.options.keyRef)
+      if (!parsedRef) {
+        // Redacted, and the likeliest cause named: --key-ref sits beside
+        // --private-key in help and both take a 0x-ish string, so the value
+        // that fails to parse here is often the key itself — which must not be
+        // quoted back into an envelope bound for the agent's context and logs.
+        //
+        // The redaction is deliberately loose (any 32+ hex run), which makes it
+        // right for hiding a secret and wrong as a test of what the value *is*:
+        // a 32-character hex-ish reference is not a key, and telling its author
+        // to pass it to --private-key sends them to a second failure. Classify
+        // with the exact shape a key actually has.
+        const redacted = redactKeyLike(c.options.keyRef)
+        const isKey = /^(?:0x)?[a-fA-F0-9]{64}$/.test(c.options.keyRef)
+        return out.fail(
+          'INVALID_KEY_REF',
+          `Invalid key reference "${redacted}". Expected <provider>:<reference>, e.g. clawdi:FILECOIN_PRIVATE_KEY.${isKey ? ' That is a private key rather than a reference to one — to set a key directly, pass it to --private-key instead.' : ''}`
+        )
+      }
+      if (!isKnownProvider(parsedRef.provider)) {
+        return out.fail(
+          'UNKNOWN_KEY_REF_PROVIDER',
+          `Unknown key-reference provider "${parsedRef.provider}". Supported: ${providerNames().join(', ')}.`
+        )
+      }
+      // Init is the only moment this is cheap to catch, and the file says so
+      // about keystore paths a few lines up. Without it, a reference the
+      // resolver will always refuse was stored anyway — `wallet init` reported
+      // `configured` and cleared the previous wallet, and every command after
+      // it failed with "re-run `foc-cli wallet init`", pointing back at the
+      // command that had just accepted the value.
+      const unsafe = unsafeRefPart(parsedRef.ref, c.options.keyProject)
+      if (unsafe) {
+        return out.fail(
+          unsafe.what === 'reference'
+            ? 'INVALID_KEY_REF'
+            : 'INVALID_KEY_PROJECT',
+          `Invalid key ${unsafe.what}: it ${unsafe.reason}.`
+        )
+      }
+    }
+
+    if (c.options.privateKey) {
+      if (!/^0x[a-fA-F0-9]{64}$/.test(c.options.privateKey)) {
+        return out.fail(
+          'INVALID_KEY',
+          'Invalid private key format. Expected 0x-prefixed 64-char hex.'
+        )
+      }
+    }
+
+    // --key-project on its own re-scopes the reference already configured, so
+    // it has its own preconditions. Judged here with the rest, since a refusal
+    // must not leave `--source` behind either.
+    if (c.options.keyProject !== undefined && !c.options.keyRef) {
+      // Paired with a method that configures a different custody mode there is
+      // nothing for a scope to apply to — say so rather than shadowing the
+      // method or repeating the silent-ignore this branch exists to remove.
+      if (c.options.auto || c.options.privateKey || c.options.keystore) {
+        return out.fail(
+          'KEY_PROJECT_WITHOUT_KEY_REF',
+          '--key-project scopes a key reference, and --auto, --private-key and --keystore all configure a wallet that uses none. Drop --key-project, or configure a reference with --key-ref instead.'
+        )
+      }
+      if (!config.get('keyRef')) {
+        return out.fail(
+          'KEY_PROJECT_WITHOUT_KEY_REF',
+          '--key-project scopes a key reference, and this wallet does not use one. Pass --key-ref <provider>:<reference> alongside it, or drop --key-project.',
+          {
+            cta: {
+              description: 'Configure a reference and its scope together:',
+              commands: keyRefCtaCommands().map((cmd) => ({
+                ...cmd,
+                options: { ...cmd.options, keyProject: c.options.keyProject },
+              })),
+            },
+          }
+        )
+      }
+      // Truthiness, not `!== undefined`: an empty scope is how a pin is dropped
+      // deliberately, and it never reaches the provider's argv.
+      const badProject = c.options.keyProject
+        ? unsafeRefReason(c.options.keyProject)
+        : null
+      if (badProject) {
+        return out.fail(
+          'INVALID_KEY_PROJECT',
+          `Invalid key project: it ${badProject}.`
+        )
+      }
+    }
 
     // Before anything is written: replacing a configured wallet discards a key
     // that may be the only copy. An interactive user gets to say no; an agent
@@ -300,8 +484,7 @@ export const initCommand = {
                 description: 'Replace it deliberately:',
                 commands: [
                   {
-                    command: 'wallet init',
-                    options: replayOptions(c.options),
+                    ...replayCommand(c.options),
                     description: 'Replace the configured wallet',
                   },
                 ],
@@ -333,44 +516,9 @@ export const initCommand = {
     // no branch matched, so the command fell through to `already_configured`,
     // wrote nothing, and reported success. The caller then believed a scope was
     // pinned that never was, and every command kept resolving against the
-    // provider's default project.
+    // provider's default project. Its preconditions were checked above.
     if (c.options.keyProject !== undefined && !c.options.keyRef) {
-      // Paired with a method that configures a different custody mode there is
-      // nothing for a scope to apply to, and this branch runs before those
-      // methods — so say so rather than either shadowing them or repeating the
-      // silent-ignore this whole branch exists to remove.
-      if (c.options.auto || c.options.privateKey || c.options.keystore) {
-        return out.fail(
-          'KEY_PROJECT_WITHOUT_KEY_REF',
-          '--key-project scopes a key reference, and --auto, --private-key and --keystore all configure a wallet that uses none. Drop --key-project, or configure a reference with --key-ref instead.'
-        )
-      }
-      const currentRef = config.get('keyRef')
-      if (!currentRef) {
-        return out.fail(
-          'KEY_PROJECT_WITHOUT_KEY_REF',
-          '--key-project scopes a key reference, and this wallet does not use one. Pass --key-ref <provider>:<reference> alongside it, or drop --key-project.',
-          {
-            cta: {
-              description: 'Configure a reference and its scope together:',
-              commands: keyRefCtaCommands().map((cmd) => ({
-                ...cmd,
-                options: { ...cmd.options, keyProject: c.options.keyProject },
-              })),
-            },
-          }
-        )
-      }
-      const badProject = c.options.keyProject
-        ? unsafeRefReason(c.options.keyProject)
-        : null
-      if (badProject) {
-        return out.fail(
-          'INVALID_KEY_PROJECT',
-          `Invalid key project: it ${badProject}.`
-        )
-      }
-
+      const currentRef = config.get('keyRef') as string
       out.step('Scoping key reference')
       // An empty value is how a scope is dropped deliberately — the same
       // convention the --keyRef branch below uses.
@@ -404,51 +552,13 @@ export const initCommand = {
     // deliberately allowed in agent mode: unlike a keystore there is no prompt,
     // so this is the one custody mode that works from MCP with no key at rest.
     if (c.options.keyRef) {
-      const parsed = parseKeyRef(c.options.keyRef)
-      if (!parsed) {
-        // Redacted, and the likeliest cause named: --key-ref sits beside
-        // --private-key in help and both take a 0x-ish string, so the value
-        // that fails to parse here is often the key itself — which must not be
-        // quoted back into an envelope bound for the agent's context and logs.
-        const redacted = redactKeyLike(c.options.keyRef)
-        const looksLikeKey = redacted !== c.options.keyRef
-        return out.fail(
-          'INVALID_KEY_REF',
-          `Invalid key reference "${redacted}". Expected <provider>:<reference>, e.g. clawdi:FILECOIN_PRIVATE_KEY.${looksLikeKey ? ' That looks like a private key rather than a reference to one — to set a key directly, pass it to --private-key instead.' : ''}`
-        )
-      }
-      if (!isKnownProvider(parsed.provider)) {
-        return out.fail(
-          'UNKNOWN_KEY_REF_PROVIDER',
-          `Unknown key-reference provider "${parsed.provider}". Supported: ${providerNames().join(', ')}.`
-        )
-      }
-      // Init is the only moment this is cheap to catch, and the file says so
-      // about keystore paths a few lines up. Without it, a reference the
-      // resolver will always refuse was stored anyway — `wallet init` reported
-      // `configured` and cleared the previous wallet, and every command after
-      // it failed with "re-run `foc-cli wallet init`", pointing back at the
-      // command that had just accepted the value.
-      const badRef = unsafeRefReason(parsed.ref)
-      if (badRef) {
-        return out.fail(
-          'INVALID_KEY_REF',
-          `Invalid key reference: it ${badRef}.`
-        )
-      }
-      const badProject = c.options.keyProject
-        ? unsafeRefReason(c.options.keyProject)
-        : null
-      if (badProject) {
-        return out.fail(
-          'INVALID_KEY_PROJECT',
-          `Invalid key project: it ${badProject}.`
-        )
-      }
-      // Validate the shape only, not that it resolves. Resolution needs the
-      // provider to be installed and authenticated, which is a different
-      // failure with a different fix — and init must stay usable while setting
-      // a machine up in any order.
+      // Parsed and validated in the prologue, which also refused an unknown
+      // provider and any value the resolver could never use.
+      const parsed = parsedRef as { provider: string; ref: string }
+      // The shape only, never that it resolves. Resolution needs the provider
+      // installed and authenticated, which is a different failure with a
+      // different fix — and init must stay usable while setting a machine up in
+      // any order.
       out.step('Configuring key reference')
       const previousRef = config.get('keyRef')
       config.set('keyRef', c.options.keyRef)
@@ -499,45 +609,11 @@ export const initCommand = {
       })
     }
 
-    if (c.options.keystore) {
-      // A keystore is unusable without a terminal: cast prompts for its
-      // password at use time, so a caller that configures one from MCP or
-      // automation locks itself out of every subsequent command. Reject at
-      // init, where the mistake is cheap to correct.
-      //
-      // canPrompt, not isAgent, and for the same reason as the preflight in
-      // client.ts: a piped or redirected stdout is not the absence of a
-      // terminal, and refusing on it would block `wallet init --keystore ... |
-      // tee setup.log` on a machine where the keystore works perfectly well.
-      if (!canPrompt(c)) {
-        return out.fail(
-          'KEYSTORE_INTERACTIVE_ONLY',
-          'Keystore mode prompts for its password on the terminal at use time, so it cannot work from MCP or automation. Configure a private-key wallet instead.',
-          {
-            cta: {
-              description: 'Choose one:',
-              commands: [
-                {
-                  command: 'wallet init',
-                  options: { auto: true },
-                  description: 'Generate random key',
-                },
-                {
-                  command: 'wallet init',
-                  options: { privateKey: '0x...' },
-                  description: 'Set key directly',
-                },
-                ...keyRefCtaCommands(),
-              ],
-            },
-          }
-        )
-      }
-      // Expand ~ ourselves so '~/.foundry/keystores/foc' works even when the
-      // shell didn't get a chance to (e.g. quoted paths).
-      const keystorePath = expandHome(c.options.keystore)
-      const problem = validateKeystoreFile(keystorePath)
-      if (problem) return out.fail(problem.code, problem.message)
+    if (keystorePath) {
+      // Reachability and file shape were both settled in the prologue, before
+      // the replacement guard — a keystore that cannot work here is refused on
+      // the first call rather than after a WALLET_ALREADY_CONFIGURED round trip
+      // whose CTA replayed --keystore straight back into this refusal.
       out.step('Configuring keystore')
       config.set('keystore', keystorePath)
       config.delete('privateKey')
@@ -551,12 +627,7 @@ export const initCommand = {
     }
 
     if (c.options.privateKey) {
-      if (!/^0x[a-fA-F0-9]{64}$/.test(c.options.privateKey)) {
-        return out.fail(
-          'INVALID_KEY',
-          'Invalid private key format. Expected 0x-prefixed 64-char hex.'
-        )
-      }
+      // Format checked in the prologue, before anything was written.
       out.step('Configuring private key')
       config.set('privateKey', c.options.privateKey)
       config.delete('keystore')
@@ -588,19 +659,22 @@ export const initCommand = {
     }
 
     // A configured key reference counts as configured — it just holds a
-    // pointer rather than a key, so there is nothing to print but the pointer,
-    // which is safe to show.
+    // pointer rather than a key, so there is nothing to print but the pointer.
+    // Safe to show once redacted: a real reference contains no 32-hex run, so
+    // this is a no-op for every legitimate value and only bites when the field
+    // holds the key itself, which is exactly when it must not be echoed.
     const existingRef = config.get('keyRef')
     if (existingRef) {
+      const shown = redactKeyLike(existingRef)
       if (!agent) {
-        p.log.success(`Key reference: ${existingRef}`)
+        p.log.success(`Key reference: ${shown}`)
         p.log.info(`Config file: ${config.path}`)
         p.outro("You're all set!")
       }
       return out.done({
         status: 'already_configured',
         configPath: config.path,
-        keyRef: existingRef,
+        keyRef: shown,
         keyProject: config.get('keyRefProject'),
         source: config.get('source') ?? 'foc-cli',
       })
