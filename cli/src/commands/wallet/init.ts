@@ -5,9 +5,9 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { keySource } from '../../client.ts'
 import config from '../../config.ts'
 import {
-  availableProviders,
   isKnownProvider,
   isProviderAvailable,
+  keyRefCtaCommands,
   parseKeyRef,
   providerNames,
 } from '../../key-ref.ts'
@@ -15,12 +15,19 @@ import { commandOutput, OutputContext } from '../../output.ts'
 import { expandHome, isAgent } from '../../utils.ts'
 
 /**
- * What an explicit method would destroy, or null when nothing is lost.
+ * What custody an explicit method would take over, or null when it takes over
+ * nothing.
  *
  * Only a change that actually replaces a credential needs confirming.
  * Re-running the same `--keyRef` or `--privateKey` is idempotent, and prompting
  * for it would train agents to pass --force reflexively — which would defeat
  * the guard entirely.
+ *
+ * The consequence is stated per mode because it genuinely differs, and only one
+ * of the three is irreversible. Claiming a key is about to be lost when it is
+ * sitting in a vault or an encrypted file on disk is the same failure as
+ * prompting for a no-op: it teaches the reader that the warning does not mean
+ * what it says.
  */
 function wouldReplace(options: {
   auto?: boolean
@@ -28,16 +35,16 @@ function wouldReplace(options: {
   keystore?: string
   keyRef?: string
   keyProject?: string
-}): { source: string; detail?: string } | null {
+}): { source: string; detail?: string; consequence: string } | null {
   const current = keySource()
   if (current === 'none') return null
 
   if (options.keyRef) {
-    const same =
-      config.get('keyRef') === options.keyRef &&
-      (config.get('keyRefProject') ?? undefined) ===
-        (options.keyProject ?? undefined)
-    if (same) return null
+    // The reference alone identifies the key. Adding or changing --keyProject
+    // re-scopes the same lookup against the same secret manager, so nothing is
+    // replaced — and refusing it would block the documented way to pin a
+    // project on an account that has more than one.
+    if (config.get('keyRef') === options.keyRef) return null
   } else if (options.keystore) {
     if (config.get('keystore') === expandHome(options.keystore)) return null
   } else if (options.privateKey) {
@@ -48,23 +55,35 @@ function wouldReplace(options: {
   }
   // --auto always mints a fresh key, so it always replaces.
 
-  // Naming what is lost makes the choice concrete. The address is derived, not
+  // Naming what changes makes the choice concrete. The address is derived, not
   // secret; a keystore path is already in the config; a reference is safe to
   // display. The key itself is never shown.
   if (current === 'privateKey') {
+    const consequence =
+      'That key exists only in this config file, so replacing it destroys it — if the address holds funds, move them first.'
     try {
       const address = privateKeyToAccount(
         config.get('privateKey') as `0x${string}`
       ).address
-      return { source: 'privateKey', detail: address }
+      return { source: 'privateKey', detail: address, consequence }
     } catch {
-      return { source: 'privateKey' }
+      return { source: 'privateKey', consequence }
     }
   }
   if (current === 'keystore') {
-    return { source: 'keystore', detail: config.get('keystore') }
+    return {
+      source: 'keystore',
+      detail: config.get('keystore'),
+      consequence:
+        'The encrypted keystore file stays on disk and can be configured again; this install just stops using it.',
+    }
   }
-  return { source: 'keyRef', detail: config.get('keyRef') }
+  return {
+    source: 'keyRef',
+    detail: config.get('keyRef'),
+    consequence:
+      'The key stays in the secret manager and can be referenced again; this install just stops using the reference.',
+  }
 }
 
 /**
@@ -120,15 +139,21 @@ function validateKeystoreFile(
 }
 
 /**
- * Key-reference options for a call to action, but only for providers actually
- * installed here — suggesting a tool the machine does not have is a dead end.
+ * The caller's own options, replayed for a call to action — minus the secret.
+ *
+ * An allowlist, not a redaction pass: an error envelope travels into the MCP
+ * result, the agent's context and every log downstream, so `--privateKey` must
+ * never ride along with it. The placeholder keeps the CTA shaped like a command
+ * the caller can run, while making it obvious the value has to be re-supplied.
  */
-function keyRefCtaCommands() {
-  return availableProviders().map((provider) => ({
-    command: 'wallet init',
-    options: { keyRef: `${provider}:FILECOIN_PRIVATE_KEY` },
-    description: `Use a key held in ${provider} (nothing at rest)`,
-  }))
+function replayOptions(options: Record<string, any>) {
+  const safe: Record<string, any> = {}
+  for (const key of ['auto', 'keystore', 'keyRef', 'keyProject', 'source']) {
+    if (options[key] !== undefined) safe[key] = options[key]
+  }
+  if (options.privateKey !== undefined) safe.privateKey = '0x...'
+  safe.force = true
+  return safe
 }
 
 function clearKeyRef() {
@@ -138,10 +163,10 @@ function clearKeyRef() {
 
 export const initCommand = {
   description:
-    'Initialize wallet with a private key, a keystore, or a reference to a key held by an external secret manager. An explicit method (--auto, --keystore, --privateKey, --keyRef) replaces any previously configured wallet; without one, an existing wallet is kept. Keystore mode prompts for its password on the terminal at use time, so it only works in interactive CLI sessions — agent mode rejects --keystore; use --auto, --privateKey, or --keyRef. --keyRef stores only a reference and fetches the key per command, so it works from MCP and automation with no key at rest.',
+    'Initialize wallet with a private key, a keystore, or a reference to a key held by an external secret manager. An explicit method (--auto, --keystore, --privateKey, --keyRef) configures the wallet; without one, an existing wallet is kept. Replacing an already-configured wallet additionally requires --force — without it the command fails with WALLET_ALREADY_CONFIGURED (or asks, on a terminal). Re-running the method already in effect changes nothing and is never blocked. Keystore mode prompts for its password on the terminal at use time, so it only works in interactive CLI sessions — agent mode rejects --keystore; use --auto, --privateKey, or --keyRef. --keyRef stores only a reference and fetches the key per command, so it works from MCP and automation with no key at rest.',
   mcp: {
     annotations: {
-      title: 'Configure wallet (replaces existing config)',
+      title: 'Configure wallet (replacing an existing one needs --force)',
       destructiveHint: true,
     },
   },
@@ -262,14 +287,14 @@ export const initCommand = {
         if (agent) {
           return out.fail(
             'WALLET_ALREADY_CONFIGURED',
-            `A wallet is already configured: ${describes}. Replacing it discards the current key, which may be the only copy. Pass --force to proceed.`,
+            `A wallet is already configured: ${describes}. ${replacing.consequence} Pass --force to proceed.`,
             {
               cta: {
                 description: 'Replace it deliberately:',
                 commands: [
                   {
                     command: 'wallet init',
-                    options: { ...c.options, force: true },
+                    options: replayOptions(c.options),
                     description: 'Replace the configured wallet',
                   },
                 ],
@@ -278,7 +303,7 @@ export const initCommand = {
           )
         }
         const confirmed = await p.confirm({
-          message: `Replace the configured wallet (${describes})? The current key is discarded and cannot be recovered.`,
+          message: `Replace the configured wallet (${describes})? ${replacing.consequence}`,
           initialValue: false,
         })
         if (p.isCancel(confirmed) || !confirmed) {
