@@ -88,7 +88,13 @@ export const fundCommand = {
             ? await synapse.payments.walletBalance()
             : await synapse.payments.walletBalance({ token: 'USDFC' })
         outcomes[asset].balance = formatBalance({ value: balance })
-        if (balance > 0n) outcomes[asset].status = 'funded'
+        if (
+          balance > 0n &&
+          outcomes[asset].status === 'missing' &&
+          !outcomes[asset].error
+        ) {
+          outcomes[asset].status = 'funded'
+        }
       } catch (error) {
         outcomes[asset].status = 'unconfirmed'
         outcomes[asset].error = [

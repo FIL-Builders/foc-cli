@@ -1270,7 +1270,7 @@ describe('wallet commands', () => {
     ])
   })
 
-  test('wallet fund preserves a changed balance after a receipt timeout', async () => {
+  test('wallet fund does not treat an existing balance as proof after a receipt timeout', async () => {
     waitForTransactionReceipt.mockImplementation(
       async (_client: any, { hash }: { hash: string }) => {
         if (hash === '0xusdfc') throw new Error('receipt timed out')
@@ -1286,10 +1286,10 @@ describe('wallet commands', () => {
       token: 'USDFC',
     })
     expect(result).toMatchObject({
-      status: 'funded',
+      status: 'unconfirmed',
       fil: { status: 'funded' },
       usdfc: {
-        status: 'funded',
+        status: 'unconfirmed',
         balance: 'formatted:2000',
         error: 'receipt timed out',
       },
@@ -1325,11 +1325,28 @@ describe('wallet commands', () => {
     expect(result.cta.description).not.toContain('faucet')
   })
 
+  test('wallet fund preserves a reverted outcome despite an existing balance', async () => {
+    waitForTransactionReceipt.mockImplementation(
+      async (_client: any, { hash }: { hash: string }) => ({
+        status: hash === '0xusdfc' ? 'reverted' : 'success',
+      })
+    )
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(result).toMatchObject({
+      status: 'partially_funded',
+      fil: { status: 'funded' },
+      usdfc: {
+        status: 'missing',
+        balance: 'formatted:2000',
+        error: 'Faucet transaction reverted',
+      },
+    })
+  })
+
   test('wallet fund rechecks both balances after the faucet helper fails', async () => {
     claimTokens.mockRejectedValueOnce(new Error('faucet unavailable'))
-    synapsePayments.walletBalance.mockImplementation(
-      async (options?: { token?: string }) => (options?.token ? 0n : 1000n)
-    )
 
     const result = await fundCommand.run(commandContext())
 
@@ -1341,8 +1358,8 @@ describe('wallet commands', () => {
     expect(result).toMatchObject({
       status: 'unconfirmed',
       faucetError: 'faucet unavailable',
-      fil: { status: 'funded', balance: 'formatted:1000' },
-      usdfc: { status: 'unconfirmed', balance: 'formatted:0' },
+      fil: { status: 'unconfirmed', balance: 'formatted:1000' },
+      usdfc: { status: 'unconfirmed', balance: 'formatted:2000' },
     })
     expect(result.error).toBeUndefined()
     expect(result.cta.description).not.toContain('Request')
