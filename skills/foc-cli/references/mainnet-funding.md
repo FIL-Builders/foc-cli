@@ -44,10 +44,10 @@ npx foc-cli wallet balance --chain 314                 # confirm FIL + USDFC arr
 npx foc-cli wallet costs --extraBytes <n> --extraRunway <months> --chain 314   # live rate + deposit needed
 ```
 
-Show the estimate and wait for explicit human confirmation. Only then continue:
+Show the estimate and wait for explicit human confirmation. Run `wallet deposit` only when `depositNeeded` is non-zero; otherwise skip it. Then obtain confirmation for the upload:
 
 ```bash
-npx foc-cli wallet deposit <amount> --chain 314        # move USDFC into the payment account
+npx foc-cli wallet deposit <depositNeeded> --chain 314 # only when depositNeeded is non-zero
 npx foc-cli upload ./file.pdf --chain 314
 ```
 
