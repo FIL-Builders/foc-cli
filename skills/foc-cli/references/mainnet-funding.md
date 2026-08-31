@@ -8,10 +8,10 @@ Mainnet (`--chain 314`) uses **real funds**: FIL pays gas, USDFC pays for storag
 ## Agent workflow
 
 1. Run `npx foc-cli wallet balance --chain 314`, then show the user the public address and the FIL, wallet USDFC, total Filecoin Pay funds, and available Filecoin Pay funds separately. A brand-new address may return `ADDRESS_NOT_ON_CHAIN`; the error still includes the address and means every balance is zero.
-2. Explain that the address needs FIL for gas and USDFC for storage, present the acquisition routes below, and ask the user to fund it. Do not perform an exchange, bridge, swap, or mint for the user.
-3. Stop and wait for the user to say funding is complete.
-4. Re-run `wallet balance --chain 314` to verify both assets arrived.
-5. Run `wallet costs` for the actual upload size, runway, and copy count. Show the estimate and required payment-account deposit, then obtain explicit confirmation before depositing or uploading.
+2. Run `wallet costs` for the actual upload size, runway, and copy count. Use `alreadyCovered` and `depositNeeded` to determine whether the existing Filecoin Pay funds cover the upload.
+3. Explain only the shortfalls: FIL is required for gas, but wallet USDFC is required only when the quote needs an additional payment-account deposit. If `alreadyCovered` is true, do not ask the user to acquire more USDFC. Present acquisition routes only for missing assets, and do not perform an exchange, bridge, swap, or mint for the user.
+4. If funding is required, ask the user to fund the displayed address, then stop and wait. Re-run `wallet balance --chain 314` and `wallet costs` after the user says funding is complete.
+5. Show the latest estimate and required payment-account deposit, then obtain explicit confirmation before depositing or uploading.
 
 ## Your wallet address
 
@@ -37,7 +37,7 @@ USDFC is a FIL-collateralized, USD-pegged stablecoin by Secured Finance ([docs](
 
 For most users storing data, **swapping** (1 or 2) is the right choice; minting (3) is a DeFi position, not just a purchase.
 
-## After funding
+## After any required funding
 
 ```bash
 npx foc-cli wallet balance --chain 314                 # confirm FIL + USDFC arrived
