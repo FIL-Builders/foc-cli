@@ -212,10 +212,10 @@ npx foc-cli wallet fund --chain 314159
 npx foc-cli wallet balance --chain 314159
 ```
 
-Before depositing or uploading, estimate the actual file and runway requirements, show the result, and obtain confirmation:
+Before depositing or uploading, estimate the actual file and runway requirements with the same `--copies` and `--withCDN` settings planned for the upload, show the result, and obtain confirmation:
 
 ```bash
-npx foc-cli wallet costs --chain 314159 --extraBytes <actual-file-bytes> --extraRunway <requested-runway-months>
+npx foc-cli wallet costs --chain 314159 --extraBytes <actual-file-bytes> --extraRunway <requested-runway-months> [--copies <requested-copies>] [--withCDN]
 ```
 
 ### Upload files
