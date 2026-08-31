@@ -8,7 +8,7 @@ Mainnet (`--chain 314`) uses **real funds**: FIL pays gas, USDFC pays for storag
 ## Agent workflow
 
 1. Run `npx foc-cli wallet balance --chain 314`, then show the user the public address and the FIL, wallet USDFC, total Filecoin Pay funds, and available Filecoin Pay funds separately. A brand-new address may return `ADDRESS_NOT_ON_CHAIN`; the error still includes the address and means every balance is zero.
-2. Run `wallet costs` for the actual upload size, runway, copy count, and CDN setting. Use `alreadyCovered` and `depositNeeded` to determine whether the existing Filecoin Pay funds cover the upload.
+2. Run `wallet costs` for the actual upload size, runway, copy count, and CDN setting. Use `alreadyCovered` and `depositNeeded` to estimate the initial funding requirement. This is not the final quote: upload re-quotes after selecting providers and may require additional funding.
 3. Explain only the shortfalls: FIL is required for gas, but wallet USDFC is required only when the quote needs an additional payment-account deposit. If `alreadyCovered` is true, do not ask the user to acquire more USDFC. Present acquisition routes only for missing assets, and do not perform an exchange, bridge, swap, or mint for the user.
 4. If funding is required, ask the user to fund the displayed address, then stop and wait. Re-run `wallet balance --chain 314` and `wallet costs` after the user says funding is complete.
 5. Show the latest estimate and required payment-account deposit, then obtain explicit confirmation before depositing or uploading.
@@ -48,7 +48,7 @@ Show the estimate and wait for explicit human confirmation. Run `wallet deposit`
 
 ```bash
 npx foc-cli wallet deposit <amount> --chain 314        # only when depositNeeded is non-zero
-npx foc-cli upload ./file.pdf --chain 314
+npx foc-cli upload ./file.pdf --chain 314 [--copies <n>] [--withCDN]
 ```
 
 Cross-check the USDFC token you received against the address foc-cli itself uses — the CLI's bundled chain config (from `@filoz/synapse-core`) pins the official USDFC contract per chain, so a mismatched balance in `wallet balance` means you hold a different token than the one FOC pays with.
