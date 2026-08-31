@@ -47,6 +47,8 @@ For any workflow that needs a wallet, use **DISCOVER → EXPLAIN → ASK** befor
    - On Calibration, offer agent-assisted faucets or show the address for user funding. On mainnet, show the address and funding instructions, then wait for the user to fund it.
 3. **Ask:** ask only for choices the environment and request have not resolved: the operation's network, wallet approach, and who will fund it. Recommend reusing a suitable existing foc-cli wallet or compatible key integration when one was found. Otherwise, for a first test, recommend Calibration, a new dedicated wallet, and agent-assisted faucet funding.
 
+Before running `wallet costs`, also ask for the storage runway if the request does not specify one; do not guess a financially relevant duration.
+
 Do not initialize or fund a wallet until those choices are resolved.
 
 ## What is FOC?
