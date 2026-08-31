@@ -106,7 +106,10 @@ export const formatBalance = mock(({ value }: { value: bigint }) => {
   return `formatted:${value.toString()}`
 })
 
-export const claimTokens = mock(async () => [{ tx_hash: '0xfaucet' }])
+export const claimTokens = mock(async () => [
+  { faucetInfo: 'CalibnetUSDFC', tx_hash: '0xusdfc' },
+  { faucetInfo: 'CalibnetFIL', tx_hash: '0xfil' },
+])
 
 export const fakeProvider = {
   id: 77n,
@@ -419,7 +422,10 @@ export function resetCommandMocks() {
   formatBalance.mockImplementation(({ value }: { value: bigint }) => {
     return `formatted:${value.toString()}`
   })
-  claimTokens.mockImplementation(async () => [{ tx_hash: '0xfaucet' }])
+  claimTokens.mockImplementation(async () => [
+    { faucetInfo: 'CalibnetUSDFC', tx_hash: '0xusdfc' },
+    { faucetInfo: 'CalibnetFIL', tx_hash: '0xfil' },
+  ])
 
   synapsePayments.walletBalance.mockImplementation(
     async (options?: { token?: string }) => (options?.token ? 2000n : 1000n)

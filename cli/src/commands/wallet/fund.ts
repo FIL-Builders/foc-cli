@@ -5,6 +5,16 @@ import { requireWallet } from '../../client.ts'
 import { chainCta, commandOutput, OutputContext } from '../../output.ts'
 import { synapseClient } from '../../synapse.ts'
 
+const assetOutput = z.object({
+  status: z.enum(['funded', 'missing', 'unconfirmed']),
+  balance: z.string().optional(),
+  txHash: z.string().optional(),
+  error: z.string().optional(),
+})
+
+type Asset = 'fil' | 'usdfc'
+type AssetOutcome = z.infer<typeof assetOutput>
+
 export const fundCommand = {
   description: 'Request testnet FIL and USDFC from faucet (testnet only)',
   mcp: {
@@ -21,49 +31,136 @@ export const fundCommand = {
   }),
   alias: { chain: 'c' },
   output: commandOutput({
-    fil: z.string(),
-    usdfc: z.string(),
+    status: z.enum(['funded', 'partially_funded', 'not_funded', 'unconfirmed']),
+    fil: assetOutput,
+    usdfc: assetOutput,
+    faucetError: z.string().optional(),
   }),
   hint: 'Only works on Calibration testnet (chain 314159).',
   async run(c: any) {
     const out = new OutputContext(c)
+    if (c.options.chain !== 314159) {
+      return out.fail(
+        'TESTNET_ONLY',
+        'wallet fund only supports Filecoin Calibration (chain 314159). Fund mainnet wallets by sending FIL and USDFC to the wallet address.'
+      )
+    }
+
     const blocked = requireWallet(c, out)
     if (blocked) return blocked
     const { client, synapse } = synapseClient(c.options.chain)
+    const outcomes: Record<Asset, AssetOutcome> = {
+      fil: { status: 'unconfirmed' },
+      usdfc: { status: 'unconfirmed' },
+    }
+    let faucetError: string | undefined
 
     try {
       out.step('Requesting faucet tokens')
       const hashes = await claimTokens({ address: client.account.address })
 
       out.step('Waiting for transactions to be mined')
-      await waitForTransactionReceipt(client, { hash: hashes[0].tx_hash })
-
-      out.step('Fetching updated balances')
-      const filBalance = await synapse.payments.walletBalance()
-      const usdfcBalance = await synapse.payments.walletBalance({
-        token: 'USDFC',
-      })
-
-      const result = {
-        fil: formatBalance({ value: filBalance }),
-        usdfc: formatBalance({ value: usdfcBalance }),
+      for (const transaction of hashes) {
+        const asset: Asset =
+          transaction.faucetInfo === 'CalibnetFIL' ? 'fil' : 'usdfc'
+        outcomes[asset].txHash = transaction.tx_hash
+        try {
+          const receipt = await waitForTransactionReceipt(client, {
+            hash: transaction.tx_hash,
+          })
+          outcomes[asset].status = 'missing'
+          if (receipt.status !== 'success') {
+            outcomes[asset].error = 'Faucet transaction reverted'
+          }
+        } catch (error) {
+          outcomes[asset].error = (error as Error).message
+        }
       }
-
-      return out.done(result, {
-        cta: chainCta(c.options.chain, {
-          description: 'Next steps:',
-          commands: [
-            {
-              command: 'wallet deposit',
-              args: { amount: '1' },
-              description: 'Deposit USDFC into payment account',
-            },
-            { command: 'wallet balance', description: 'Check balances' },
-          ],
-        }),
-      })
     } catch (error) {
-      return out.fail('FUND_FAILED', (error as Error).message)
+      faucetError = (error as Error).message
     }
+
+    out.step('Fetching updated balances')
+    for (const asset of ['fil', 'usdfc'] as const) {
+      try {
+        const balance =
+          asset === 'fil'
+            ? await synapse.payments.walletBalance()
+            : await synapse.payments.walletBalance({ token: 'USDFC' })
+        outcomes[asset].balance = formatBalance({ value: balance })
+        if (balance > 0n) outcomes[asset].status = 'funded'
+      } catch (error) {
+        outcomes[asset].status = 'unconfirmed'
+        outcomes[asset].error = [
+          outcomes[asset].error,
+          `Balance check failed: ${(error as Error).message}`,
+        ]
+          .filter(Boolean)
+          .join('; ')
+      }
+    }
+
+    const funded = [outcomes.fil, outcomes.usdfc].filter(
+      ({ status }) => status === 'funded'
+    ).length
+    const hasUnconfirmed = [outcomes.fil, outcomes.usdfc].some(
+      ({ status }) => status === 'unconfirmed'
+    )
+    const status = hasUnconfirmed
+      ? 'unconfirmed'
+      : funded === 2
+        ? 'funded'
+        : funded === 1
+          ? 'partially_funded'
+          : 'not_funded'
+    const unavailable = (['fil', 'usdfc'] as const).filter(
+      (asset) => outcomes[asset].status !== 'funded'
+    )
+    const unavailableSummary = unavailable
+      .map((asset) => `${asset.toUpperCase()} is ${outcomes[asset].status}`)
+      .join(', ')
+    const hasMissing = unavailable.some(
+      (asset) => outcomes[asset].status === 'missing'
+    )
+    const recovery = [
+      hasMissing
+        ? 'Request only missing assets from a documented Calibration faucet.'
+        : '',
+      hasUnconfirmed ? 'Check unconfirmed balances before retrying.' : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+    const cta =
+      status === 'funded'
+        ? {
+            description: 'Next steps:',
+            commands: [
+              {
+                command: 'wallet deposit',
+                args: { amount: '1' },
+                description: 'Deposit USDFC into payment account',
+              },
+              { command: 'wallet balance', description: 'Check balances' },
+            ],
+          }
+        : {
+            description: `Funding incomplete: ${unavailableSummary}. ${recovery}`,
+            commands: [
+              {
+                command: 'wallet balance',
+                description: 'Verify wallet balances before continuing',
+              },
+            ],
+          }
+
+    return out.done(
+      {
+        status,
+        fil: outcomes.fil,
+        usdfc: outcomes.usdfc,
+        ...(faucetError ? { faucetError } : {}),
+      },
+      { cta: chainCta(c.options.chain, cta) }
+    )
   },
 }
