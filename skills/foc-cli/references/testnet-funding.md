@@ -18,13 +18,16 @@ Calibration (`--chain 314159`) needs tFIL for gas and tUSDFC for storage payment
 2. Use the user's funding choice if it is already known. Otherwise, ask whether the user wants to fund the address or wants agent-assisted faucet funding.
 
    - **User-funded:** show the address and the documented faucets below, then stop and wait.
-   - **Agent-assisted:** run the built-in faucet command once:
+   - **Agent-assisted, both assets missing:** run the built-in faucet command once:
 
      ```bash
      npx foc-cli wallet fund --chain 314159
      ```
 
-3. Whether `wallet fund` succeeds, fails, or times out, re-check the balance before deciding what happened:
+   - **Only one asset missing:** do not run the combined command; use the matching asset-specific browser handoff below.
+   - **Neither asset missing:** skip funding.
+
+3. After any faucet attempt, re-check the balance before deciding what happened:
 
    ```bash
    npx foc-cli wallet balance --chain 314159
