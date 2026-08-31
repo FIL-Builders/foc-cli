@@ -27,6 +27,28 @@ npx foc-cli <cmd> -h                          # usage, args, options, examples
 npx foc-cli <cmd> --schema --format json      # JSON Schema: args, options, output shape
 ```
 
+## Before wallet setup
+
+For any workflow that needs a wallet, use **DISCOVER → EXPLAIN → ASK** before initializing or funding one:
+
+1. **Discover:** inspect the available wallet, custody, and secret-manager skills or tools, then safely check for an existing foc-cli wallet:
+
+   ```bash
+   npx foc-cli wallet init --json
+   ```
+
+   With no initialization method, this keeps an existing wallet unchanged and reports whether one is configured; if none exists, it reports that a method is required. Never inspect the config contents or request, read, or display a private key.
+2. **Explain:** tailor the relevant choices to what you found:
+   - Reuse an existing foc-cli wallet; never replace it automatically.
+   - A compatible secret-manager integration can provide a signing key through `--keyRef` without storing the key in foc-cli.
+   - Another wallet skill can fund the foc-cli public address even when it cannot sign foc-cli operations.
+   - If nothing suitable exists, offer a new dedicated foc-cli wallet.
+   - **Calibration** is for testing with faucet-provided tFIL and tUSDFC. **Mainnet** uses real FIL for gas and real USDFC for storage.
+   - On Calibration, offer agent-assisted faucets or show the address for user funding. On mainnet, show the address and funding instructions, then wait for the user to fund it.
+3. **Ask:** ask only for choices the environment and request have not resolved: the operation's network, wallet approach, and who will fund it. Recommend reusing a suitable existing foc-cli wallet or compatible key integration when one was found. Otherwise, for a first test, recommend Calibration, a new dedicated wallet, and agent-assisted faucet funding.
+
+Do not initialize or fund a wallet until those choices are resolved.
+
 ## What is FOC?
 
 FOC turns Filecoin into a **programmable cloud** with four layers:
@@ -178,14 +200,20 @@ To acceptance-test a whole dataset, list its piece CIDs via `piece list` or `dat
 
 ## Workflows
 
-### First-time setup (testnet)
+### First-time setup (selected Calibration path)
+
+Only after the user chooses Calibration, a dedicated wallet, and agent-assisted faucet funding:
 
 ```bash
 npx foc-cli wallet init --auto
-npx foc-cli wallet fund
-npx foc-cli wallet costs --extraBytes 1000000 --extraRunway 1  # estimate before depositing
-npx foc-cli wallet deposit 1
-npx foc-cli wallet balance
+npx foc-cli wallet fund --chain 314159
+npx foc-cli wallet balance --chain 314159
+```
+
+Before depositing or uploading, estimate the actual file and runway requirements, show the result, and obtain confirmation:
+
+```bash
+npx foc-cli wallet costs --chain 314159 --extraBytes <actual-file-bytes> --extraRunway <requested-runway-months>
 ```
 
 ### Upload files
