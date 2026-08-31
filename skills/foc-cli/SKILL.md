@@ -99,7 +99,7 @@ If anything in this file ever disagrees with the live `-h`/`--schema` output, tr
 
 No RPC or env setup is needed: `getChain()` from `@filoz/synapse-core/chains` bundles the viem chain definition, default Glif RPC endpoints, and every FOC contract address (USDFC, FWSS, Filecoin Pay, PDP verifier, provider registry) for both chains, keyed by chain ID. The CLI's only persistent state is its wallet config file (see Setup). For dApp environment setup (custom RPCs, Next.js env vars, browser wallets), search the live docs instead of guessing: `npx foc-cli docs --prompt "getting started"`.
 
-**Funding:** testnet is one command (`wallet fund`: free tFIL + tUSDFC from faucets). Mainnet has no faucet; real FIL (gas) and USDFC (storage) must be acquired. See [references/mainnet-funding.md](references/mainnet-funding.md) for exchange/bridge/swap/mint routes and the exchange-withdrawal address caveat.
+**Funding:** testnet is one command (`wallet fund`: free tFIL + tUSDFC from faucets), with balance checks and documented fallbacks in [references/testnet-funding.md](references/testnet-funding.md). Mainnet has no faucet; real FIL (gas) and USDFC (storage) must be acquired. See [references/mainnet-funding.md](references/mainnet-funding.md) for the user-funded workflow, exchange/bridge/swap/mint routes, and the exchange-withdrawal address caveat.
 
 ## Global Options
 
