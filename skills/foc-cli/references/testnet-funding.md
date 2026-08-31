@@ -35,7 +35,7 @@ Calibration (`--chain 314159`) needs tFIL for gas and tUSDFC for storage payment
    npx foc-cli wallet balance --chain 314159
    ```
 
-   One faucet asset may have arrived even when the combined command reports an error. If a returned transaction is pending, or the command failed or timed out without a definitive per-asset result, treat a zero balance as unconfirmed: wait and re-check, then stop rather than submitting another claim. Use a fallback only for an asset known not to have been claimed or confirmed, and never submit a duplicate claim.
+   One faucet asset may have arrived even when the combined command reports an error. After the combined command, treat any zero balance as unconfirmed even if the command reported success: wait and re-check after a delay, then stop rather than submitting another claim. Use a fallback only for an asset known not to have been claimed or confirmed, and never submit a duplicate claim.
 
 5. After any required funding arrives, re-run `wallet costs`. Its `depositNeeded` and `needsFwssMaxApproval` fields are distinct from wallet and Filecoin Pay balances.
 
