@@ -15,19 +15,21 @@ Calibration (`--chain 314159`) needs tFIL for gas and tUSDFC for storage payment
 
    Report the address, tFIL (`fil`), wallet tUSDFC (`usdfc`), total Filecoin Pay funds (`funds`), and currently available Filecoin Pay funds (`availableFunds`) separately. A brand-new, unfunded address may return `ADDRESS_NOT_ON_CHAIN`; the error still includes the address and means every balance is zero.
 
-2. Use the user's funding choice if it is already known. Otherwise, ask whether the user wants to fund the address or wants agent-assisted faucet funding.
+2. Run `wallet costs` for the actual upload size, runway, copy count, and CDN setting. Use `alreadyCovered` and `depositNeeded` to determine whether Filecoin Pay needs more tUSDFC. If `alreadyCovered` is true, do not request wallet tUSDFC. Otherwise, compare `depositNeeded` with the wallet tUSDFC balance and request only the shortfall.
+
+3. Use the user's funding choice if it is already known. Otherwise, ask whether the user wants to fund the address or wants agent-assisted faucet funding.
 
    - **User-funded:** show the address and the documented faucets below, then stop and wait.
-   - **Agent-assisted, both assets missing:** run the built-in faucet command once:
+   - **Agent-assisted, tFIL and tUSDFC both required:** run the built-in faucet command once:
 
      ```bash
      npx foc-cli wallet fund --chain 314159
      ```
 
-   - **Only one asset missing:** do not run the combined command; use the matching asset-specific browser handoff below.
-   - **Neither asset missing:** skip funding.
+   - **Only one asset required:** do not run the combined command; use the matching asset-specific browser handoff below.
+   - **Neither asset required:** skip funding.
 
-3. After any faucet attempt, re-check the balance before deciding what happened:
+4. After any faucet attempt, re-check the balance before deciding what happened:
 
    ```bash
    npx foc-cli wallet balance --chain 314159
@@ -35,7 +37,7 @@ Calibration (`--chain 314159`) needs tFIL for gas and tUSDFC for storage payment
 
    One faucet asset may have arrived even when the combined command reports an error. If a returned transaction is pending, or the command failed or timed out without a definitive per-asset result, treat a zero balance as unconfirmed: wait and re-check, then stop rather than submitting another claim. Use a fallback only for an asset known not to have been claimed or confirmed, and never submit a duplicate claim.
 
-4. After wallet tFIL and tUSDFC are present, run `wallet costs` for the actual upload size, runway, and copy count. Its `depositNeeded` and `needsFwssMaxApproval` fields are distinct from wallet and Filecoin Pay balances.
+5. After any required funding arrives, re-run `wallet costs`. Its `depositNeeded` and `needsFwssMaxApproval` fields are distinct from wallet and Filecoin Pay balances.
 
 ## Documented fallback ladder
 
