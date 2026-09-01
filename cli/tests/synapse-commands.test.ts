@@ -1086,11 +1086,9 @@ describe('wallet commands', () => {
       providerId: 78n,
       pdpEndEpoch: 999n,
     }
-    getPdpDataSets.mockResolvedValueOnce([
-      activeDataSet,
-      sameProviderDataSet,
-      terminatingDataSet,
-    ] as any)
+    getPdpDataSets.mockResolvedValueOnce({
+      items: [activeDataSet, sameProviderDataSet, terminatingDataSet],
+    } as any)
 
     const result = await costsCommand.run(
       commandContext({
@@ -1100,6 +1098,7 @@ describe('wallet commands', () => {
 
     expect(getPdpDataSets).toHaveBeenCalledWith(fakeWalletClient, {
       address: fakeWalletClient.account.address,
+      cursor: 0n,
     })
     expect(synapseStorage.createContext).toHaveBeenCalledTimes(2)
     expect(synapseStorage.createContext).toHaveBeenCalledWith({
@@ -1125,7 +1124,7 @@ describe('wallet commands', () => {
   })
 
   test('wallet costs prices two new datasets for an empty wallet without provider selection', async () => {
-    getPdpDataSets.mockResolvedValueOnce([] as any)
+    getPdpDataSets.mockResolvedValueOnce({ items: [] } as any)
 
     const result = await costsCommand.run(
       commandContext({
@@ -1150,15 +1149,17 @@ describe('wallet commands', () => {
   // must price the copies the next upload will write — not every dataset the
   // wallet has ever created.
   test('wallet costs with one active dataset prices the second copy as a new dataset', async () => {
-    getPdpDataSets.mockResolvedValueOnce([
-      {
-        dataSetId: 42n,
-        providerId: 77n,
-        live: true,
-        managed: true,
-        pdpEndEpoch: 0n,
-      },
-    ] as any)
+    getPdpDataSets.mockResolvedValueOnce({
+      items: [
+        {
+          dataSetId: 42n,
+          providerId: 77n,
+          live: true,
+          managed: true,
+          pdpEndEpoch: 0n,
+        },
+      ],
+    } as any)
 
     await costsCommand.run(
       commandContext({ options: { extraBytes: 1024, extraRunway: 1 } })
@@ -1174,11 +1175,13 @@ describe('wallet commands', () => {
 
   test('wallet costs with three active datasets prices only the requested copies', async () => {
     const base = { providerId: 77n, live: true, managed: true, pdpEndEpoch: 0n }
-    getPdpDataSets.mockResolvedValueOnce([
-      { ...base, dataSetId: 42n },
-      { ...base, dataSetId: 43n },
-      { ...base, dataSetId: 44n },
-    ] as any)
+    getPdpDataSets.mockResolvedValueOnce({
+      items: [
+        { ...base, dataSetId: 42n },
+        { ...base, dataSetId: 43n },
+        { ...base, dataSetId: 44n },
+      ],
+    } as any)
 
     await costsCommand.run(
       commandContext({ options: { extraBytes: 1024, extraRunway: 1 } })
@@ -1193,7 +1196,7 @@ describe('wallet commands', () => {
   })
 
   test('wallet costs --copies overrides how many contexts are priced', async () => {
-    getPdpDataSets.mockResolvedValueOnce([] as any)
+    getPdpDataSets.mockResolvedValueOnce({ items: [] } as any)
 
     await costsCommand.run(
       commandContext({
@@ -1344,6 +1347,7 @@ describe('dataset commands', () => {
 
     expect(getPdpDataSets).toHaveBeenCalledWith(fakeWalletClient, {
       address: fakeWalletClient.account.address,
+      cursor: 0n,
     })
     expect(getBlockNumber).toHaveBeenCalledWith(fakeWalletClient)
     expect(result).toMatchObject({
@@ -1374,7 +1378,7 @@ describe('dataset commands', () => {
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
       dataSet: expect.anything(),
       address: fakeWalletClient.account.address,
-      offset: 0n,
+      cursor: 0n,
       limit: 100n,
     })
     expect(result.dataset).toMatchObject({
@@ -1386,7 +1390,7 @@ describe('dataset commands', () => {
       live: true,
       managed: false,
       terminating: false,
-      activePieceCount: '2',
+      hasActivePieces: true,
       metadata: { label: 'dataset' },
     })
     expect(result.pieces).toEqual([
@@ -1398,7 +1402,7 @@ describe('dataset commands', () => {
         metadata: { name: 'file.txt' },
       },
     ])
-    expect(result.hasMore).toBe(false)
+    expect(result.nextCursor).toBeUndefined()
   })
 
   test('dataset terminate calls Synapse Core and maps the termination event', async () => {
@@ -1419,7 +1423,7 @@ describe('dataset commands', () => {
 
   test('dataset details returns an object for empty piece metadata', async () => {
     getPiecesWithMetadata.mockImplementationOnce(async () => ({
-      pieces: [
+      items: [
         {
           id: 8n,
           cid: cid('baga-empty-metadata'),
@@ -1427,7 +1431,6 @@ describe('dataset commands', () => {
           metadata: {},
         },
       ],
-      hasMore: false,
     }))
 
     const result = await datasetDetailsCommand.run(
@@ -1447,7 +1450,7 @@ describe('dataset commands', () => {
 
   test('dataset details paginates and emits a next-page CTA when more pieces remain', async () => {
     getPiecesWithMetadata.mockImplementationOnce(async () => ({
-      pieces: [
+      items: [
         {
           id: 7n,
           cid: cid('baga-page1'),
@@ -1455,30 +1458,24 @@ describe('dataset commands', () => {
           metadata: { name: 'file.txt' },
         },
       ],
-      hasMore: true,
+      nextCursor: 8n,
     }))
 
     const result = await datasetDetailsCommand.run(
-      commandContext({ options: { dataSetId: 42, offset: 5, limit: 1 } })
+      commandContext({ options: { dataSetId: 42, cursor: 5, limit: 1 } })
     )
 
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
       dataSet: expect.anything(),
       address: fakeWalletClient.account.address,
-      offset: 5n,
+      cursor: 5n,
       limit: 1n,
     })
-    expect(result.hasMore).toBe(true)
-    expect(result.nextOffset).toBe(6)
+    expect(result.nextCursor).toBe('8')
     expect(result.cta.commands).toContainEqual({
       command: 'dataset details',
-      options: { chain: 314159, dataSetId: 42, offset: 6, limit: 1 },
-      description: 'Show the next page of pieces (offset 6)',
-    })
-    expect(result.cta.commands).toContainEqual({
-      command: 'dataset details',
-      options: { chain: 314159, dataSetId: 42, offset: 0, limit: 2 },
-      description: 'Fetch all 2 pieces in one call',
+      options: { chain: 314159, dataSetId: 42, cursor: 8, limit: 1 },
+      description: 'Show the next page of pieces (cursor 8)',
     })
   })
 })
@@ -1495,7 +1492,7 @@ describe('piece commands', () => {
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
       dataSet: expect.anything(),
       address: fakeWalletClient.account.address,
-      offset: 0n,
+      cursor: 0n,
       limit: 100n,
     })
     expect(result).toMatchObject({
@@ -1510,12 +1507,12 @@ describe('piece commands', () => {
         },
       ],
     })
-    expect(result.hasMore).toBe(false)
+    expect(result.nextCursor).toBeUndefined()
   })
 
   test('piece list paginates and emits a next-page CTA when more pieces remain', async () => {
     getPiecesWithMetadata.mockImplementationOnce(async () => ({
-      pieces: [
+      items: [
         {
           id: 7n,
           cid: cid('baga-page1'),
@@ -1523,35 +1520,28 @@ describe('piece commands', () => {
           metadata: { name: 'file.txt' },
         },
       ],
-      hasMore: true,
+      nextCursor: 8n,
     }))
 
     const result = await pieceListCommand.run(
       commandContext({
         args: { dataSetId: 42 },
-        options: { offset: 5, limit: 1 },
+        options: { cursor: 5, limit: 1 },
       })
     )
 
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
       dataSet: expect.anything(),
       address: fakeWalletClient.account.address,
-      offset: 5n,
+      cursor: 5n,
       limit: 1n,
     })
-    expect(result.hasMore).toBe(true)
-    expect(result.nextOffset).toBe(6)
+    expect(result.nextCursor).toBe('8')
     expect(result.cta.commands).toContainEqual({
       command: 'piece list',
       args: { dataSetId: 42 },
-      options: { chain: 314159, offset: 6, limit: 1 },
-      description: 'Show the next page of pieces (offset 6)',
-    })
-    expect(result.cta.commands).toContainEqual({
-      command: 'piece list',
-      args: { dataSetId: 42 },
-      options: { chain: 314159, offset: 0, limit: 2 },
-      description: 'Fetch all 2 pieces in one call',
+      options: { chain: 314159, cursor: 8, limit: 1 },
+      description: 'Show the next page of pieces (cursor 8)',
     })
   })
 

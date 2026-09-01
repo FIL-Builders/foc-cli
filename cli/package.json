@@ -55,8 +55,8 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.0.0",
-    "@filoz/synapse-core": "^0.7.0",
-    "@filoz/synapse-sdk": "^1.1.0",
+    "@filoz/synapse-core": "^0.8.1",
+    "@filoz/synapse-sdk": "^1.2.1",
     "conf": "^15.0.2",
     "incur": "^0.4.19",
     "terminal-link": "^5.0.0",

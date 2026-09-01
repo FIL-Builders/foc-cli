@@ -16,10 +16,12 @@ export const detailsCommand = {
       .number()
       .default(314159)
       .describe('Chain ID. 314159 = Calibration, 314 = Mainnet'),
-    offset: z.coerce
+    cursor: z.coerce
       .number()
-      .default(0)
-      .describe('Piece offset to start from (for pagination)'),
+      .optional()
+      .describe(
+        'Resume from a previous page: pass the nextCursor value that page returned. Omit for the first page.'
+      ),
     limit: z.coerce
       .number()
       .default(100)
@@ -37,7 +39,7 @@ export const detailsCommand = {
       live: z.boolean(),
       managed: z.boolean(),
       terminating: z.boolean(),
-      activePieceCount: z.string(),
+      hasActivePieces: z.boolean(),
       metadata: z.record(z.string(), z.string()),
     }),
     pieces: z.array(
@@ -49,8 +51,12 @@ export const detailsCommand = {
         metadata: z.record(z.string(), z.string()),
       })
     ),
-    hasMore: z.boolean(),
-    nextOffset: z.number().optional(),
+    nextCursor: z
+      .string()
+      .optional()
+      .describe(
+        'Present when more pieces remain — pass it back as --cursor to fetch the next page'
+      ),
   }),
   async run(c: any) {
     const out = new OutputContext(c)
@@ -71,14 +77,13 @@ export const detailsCommand = {
         )
       }
 
-      const offset = c.options.offset ?? 0
       const limit = c.options.limit ?? 100
 
       out.step('Fetching pieces and metadata')
-      const { pieces, hasMore } = await getPiecesWithMetadata(client, {
+      const { items, nextCursor } = await getPiecesWithMetadata(client, {
         dataSet: ds,
         address: client.account.address,
-        offset: BigInt(offset),
+        cursor: BigInt(c.options.cursor ?? 0),
         limit: BigInt(limit),
       })
 
@@ -91,11 +96,11 @@ export const detailsCommand = {
         live: !!ds.live,
         managed: !!ds.managed,
         terminating: ds.pdpEndEpoch > 0n,
-        activePieceCount: ds.activePieceCount,
+        hasActivePieces: ds.hasActivePieces,
         metadata: ds.metadata,
       }
 
-      const piecesList = pieces.map((piece: any) => {
+      const piecesList = items.map((piece: any) => {
         const cid = piece.cid.toString()
         return {
           id: piece.id,
@@ -106,37 +111,31 @@ export const detailsCommand = {
         }
       })
 
-      const nextOffset = offset + piecesList.length
-      const totalPieces = Number(ds.activePieceCount)
-      const nextPage = hasMore
-        ? [
-            {
-              command: 'dataset details',
-              options: {
-                dataSetId: c.options.dataSetId,
-                offset: nextOffset,
-                limit,
+      // Cursors are opaque continuation values; there is no total piece count
+      // any more (synapse-core 0.8 dropped activePieceCount), so "fetch all"
+      // means following nextCursor pages until it stops appearing.
+      const nextPage =
+        nextCursor !== undefined
+          ? [
+              {
+                command: 'dataset details',
+                options: {
+                  dataSetId: c.options.dataSetId,
+                  cursor: Number(nextCursor),
+                  limit,
+                },
+                description: `Show the next page of pieces (cursor ${nextCursor})`,
               },
-              description: `Show the next page of pieces (offset ${nextOffset})`,
-            },
-            {
-              command: 'dataset details',
-              options: {
-                dataSetId: c.options.dataSetId,
-                offset: 0,
-                limit: totalPieces,
-              },
-              description: `Fetch all ${totalPieces} pieces in one call`,
-            },
-          ]
-        : []
+            ]
+          : []
 
       return out.done(
         {
           dataset,
           pieces: piecesList,
-          hasMore,
-          ...(hasMore ? { nextOffset } : {}),
+          ...(nextCursor !== undefined
+            ? { nextCursor: nextCursor.toString() }
+            : {}),
         },
         {
           cta: chainCta(c.options.chain, {

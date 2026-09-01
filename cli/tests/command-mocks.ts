@@ -1,4 +1,5 @@
 import { mock } from 'bun:test'
+import * as viemActions from 'viem/actions'
 
 export function cid(value: string) {
   return {
@@ -176,13 +177,13 @@ const fakeDataSet = {
   live: true,
   managed: false,
   pdpEndEpoch: 0n,
-  activePieceCount: 2n,
+  hasActivePieces: true,
   metadata: {
     label: 'dataset',
   },
 }
 
-export const getPdpDataSets = mock(async () => [fakeDataSet])
+export const getPdpDataSets = mock(async () => ({ items: [fakeDataSet] }))
 export const getPdpDataSet = mock(async () => fakeDataSet)
 
 const fakePiece = {
@@ -195,8 +196,7 @@ const fakePiece = {
 }
 
 export const getPiecesWithMetadata = mock(async () => ({
-  pieces: [fakePiece],
-  hasMore: false,
+  items: [fakePiece],
 }))
 
 export const createDataSet = mock(async () => ({
@@ -387,7 +387,11 @@ mock.module('@filoz/synapse-core/pay', () => ({
   getAccountSummary,
 }))
 
+// Spread the real module: the root '@filoz/synapse-core' entry (imported for
+// paginate) transitively pulls other viem actions, and a two-export mock made
+// that import fail with "Export named 'readContract' not found".
 mock.module('viem/actions', () => ({
+  ...viemActions,
   getBlockNumber,
   waitForTransactionReceipt,
 }))
@@ -487,11 +491,10 @@ export function resetCommandMocks() {
     async () => fakeProviderSelectionInput
   )
   fetchMock.mockImplementation(async () => new Response(null, { status: 200 }))
-  getPdpDataSets.mockImplementation(async () => [fakeDataSet])
+  getPdpDataSets.mockImplementation(async () => ({ items: [fakeDataSet] }))
   getPdpDataSet.mockImplementation(async () => fakeDataSet)
   getPiecesWithMetadata.mockImplementation(async () => ({
-    pieces: [fakePiece],
-    hasMore: false,
+    items: [fakePiece],
   }))
 
   createDataSet.mockImplementation(async () => ({
