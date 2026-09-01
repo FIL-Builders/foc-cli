@@ -29,13 +29,17 @@ Calibration (`--chain 314159`) needs tFIL for gas and tUSDFC for storage payment
    - **Only one asset required:** do not run the combined command; use the matching asset-specific browser handoff below.
    - **Neither asset required:** skip funding.
 
-4. After any faucet attempt, re-check the balance before deciding what happened:
+4. After `wallet fund`, read `fil.status` and `usdfc.status` separately. The top-level `status` is only a summary; do not infer both asset outcomes from it or from one combined error.
 
-   ```bash
-   npx foc-cli wallet balance --chain 314159
-   ```
+   - **`funded`:** the faucet transaction succeeded and a positive balance was observed. Do not request that asset again.
+   - **`missing`:** the asset was not funded. If it is still required, use only its matching documented fallback below.
+   - **`unconfirmed`:** the submission, receipt, or balance check is still uncertain. Do not retry or use another faucet yet. Check any returned `txHash`, wait, then run:
 
-   One faucet asset may have arrived even when the combined command reports an error. After the combined command, treat any zero balance as unconfirmed even if the command reported success: wait and re-check after a delay, then stop rather than submitting another claim. Use a fallback only for an asset known not to have been claimed or confirmed, and never submit a duplicate claim.
+     ```bash
+     npx foc-cli wallet balance --chain 314159
+     ```
+
+     If the balance appears, continue without another claim. If it remains zero, report the unknown outcome and stop rather than risking a duplicate claim.
 
 5. After any required funding arrives, re-run `wallet costs`. Its `depositNeeded` and `needsFwssMaxApproval` fields are distinct from wallet and Filecoin Pay balances.
 
