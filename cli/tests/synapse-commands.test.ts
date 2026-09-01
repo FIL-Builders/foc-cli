@@ -1261,6 +1261,7 @@ describe('wallet commands', () => {
       usdfc: { status: 'unconfirmed' },
     })
     expect(result.usdfc.txHash).toBeUndefined()
+    expect(result.processLog[1]).toMatchObject({ status: 'failed' })
   })
 
   test('wallet fund leaves a successful claim unconfirmed until its balance appears', async () => {
@@ -1323,6 +1324,11 @@ describe('wallet commands', () => {
         balance: 'formatted:2000',
         error: 'receipt timed out',
       },
+    })
+    expect(result.processLog[1]).toEqual({
+      step: 'Waiting for transactions to be mined',
+      status: 'failed',
+      error: 'receipt timed out',
     })
   })
 
@@ -1398,6 +1404,11 @@ describe('wallet commands', () => {
         error:
           'Faucet transaction reverted; Balance check failed: RPC unavailable',
       },
+    })
+    expect(result.processLog[2]).toEqual({
+      step: 'Fetching updated balances',
+      status: 'failed',
+      error: 'Balance check failed: RPC unavailable',
     })
   })
 

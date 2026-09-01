@@ -69,6 +69,7 @@ export const fundCommand = {
               : undefined
         if (!asset) {
           faucetError = `Unexpected faucet asset: ${transaction.faucetInfo}`
+          out.failStep(faucetError)
           continue
         }
         outcomes[asset].txHash = transaction.tx_hash
@@ -79,9 +80,11 @@ export const fundCommand = {
           outcomes[asset].status = 'missing'
           if (receipt.status !== 'success') {
             outcomes[asset].error = 'Faucet transaction reverted'
+            out.failStep(outcomes[asset].error)
           }
         } catch (error) {
           outcomes[asset].error = (error as Error).message
+          out.failStep(outcomes[asset].error)
         }
       }
     } catch (error) {
@@ -102,12 +105,11 @@ export const fundCommand = {
         }
       } catch (error) {
         if (!outcomes[asset].error) outcomes[asset].status = 'unconfirmed'
-        outcomes[asset].error = [
-          outcomes[asset].error,
-          `Balance check failed: ${(error as Error).message}`,
-        ]
+        const balanceError = `Balance check failed: ${(error as Error).message}`
+        outcomes[asset].error = [outcomes[asset].error, balanceError]
           .filter(Boolean)
           .join('; ')
+        out.failStep(balanceError)
       }
     }
 
