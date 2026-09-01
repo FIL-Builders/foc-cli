@@ -86,6 +86,7 @@ export const fundCommand = {
       }
     } catch (error) {
       faucetError = (error as Error).message
+      out.failStep(faucetError)
     }
 
     out.step('Fetching updated balances')

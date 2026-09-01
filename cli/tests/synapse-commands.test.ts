@@ -1417,6 +1417,11 @@ describe('wallet commands', () => {
       fil: { status: 'unconfirmed', balance: 'formatted:1000' },
       usdfc: { status: 'unconfirmed', balance: 'formatted:2000' },
     })
+    expect(result.processLog[0]).toEqual({
+      step: 'Requesting faucet tokens',
+      status: 'failed',
+      error: 'faucet unavailable',
+    })
     expect(result.error).toBeUndefined()
     expect(result.cta.description).not.toContain('Request')
   })
