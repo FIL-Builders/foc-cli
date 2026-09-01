@@ -1,3 +1,4 @@
+import { paginate } from '@filoz/synapse-core'
 import { getPdpDataSets } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
 import { getBlockNumber } from 'viem/actions'
@@ -42,8 +43,14 @@ export const listCommand = {
 
     try {
       out.step('Listing data sets')
+      // getPdpDataSets returns bounded pages (default 100); walk every page so
+      // the listing stays complete for wallets with many datasets.
       const [dataSets, blockNumber] = await Promise.all([
-        getPdpDataSets(client, { address: client.account.address }),
+        Array.fromAsync(
+          paginate(({ cursor }) =>
+            getPdpDataSets(client, { address: client.account.address, cursor })
+          )
+        ),
         getBlockNumber(client),
       ])
 

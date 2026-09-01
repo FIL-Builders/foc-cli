@@ -183,7 +183,7 @@ To acceptance-test a whole dataset, list its piece CIDs via `piece list` or `dat
 | Command | Description |
 |---------|-------------|
 | `dataset list` | All datasets with provider, CDN status, state |
-| `dataset details -d <id> [--offset N] [--limit M]` | Dataset metadata + pieces. Lists up to `--limit` pieces (default 100) starting at `--offset`; when more remain it returns `hasMore` + `nextOffset` plus two CTAs: the exact next-page command and a fetch-all command (`--offset 0 --limit <activePieceCount>`) |
+| `dataset details -d <id> [--cursor N] [--limit M]` | Dataset metadata (including `hasActivePieces`) + pieces. Lists up to `--limit` pieces (default 100); when more remain it returns `nextCursor` plus a CTA with the exact next-page command (`--cursor <nextCursor>`) |
 | `dataset create <providerId> [--cdn]` | Create dataset with a provider from `provider list` |
 | `dataset terminate <dataSetId>` | Stop PDP service for a dataset |
 
@@ -191,7 +191,7 @@ To acceptance-test a whole dataset, list its piece CIDs via `piece list` or `dat
 
 | Command | Description |
 |---------|-------------|
-| `piece list <dataSetId> [--offset N] [--limit M]` | Pieces in dataset with CID + metadata. Paginated (default 100/page); when `hasMore` is true it returns two CTAs: the next-page command (`--offset <nextOffset>`) and a fetch-all command (`--offset 0 --limit <activePieceCount>`) — use fetch-all when you need every piece CID (e.g. to download/verify a whole dataset) |
+| `piece list <dataSetId> [--cursor N] [--limit M]` | Pieces in dataset with CID + metadata. Paginated (default 100/page); when more remain it returns `nextCursor` plus a CTA with the exact next-page command (`--cursor <nextCursor>`). To collect every piece CID (e.g. to download/verify a whole dataset), follow `nextCursor` pages until it stops appearing, or raise `--limit` |
 | `piece remove <dataSetId> <pieceId>` | Remove piece from dataset |
 
 ### Provider Info
@@ -242,7 +242,7 @@ npx foc-cli piece list 42                                # all piece CIDs (fetch
 npx foc-cli dataset list
 npx foc-cli dataset details -d 42
 npx foc-cli piece list 42
-npx foc-cli piece list 42 --offset 100 --limit 100   # next page when hasMore is true
+npx foc-cli piece list 42 --cursor 100 --limit 100   # next page: --cursor takes the previous nextCursor
 npx foc-cli piece remove 42 7
 npx foc-cli dataset terminate 42
 ```

@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import type { Chain } from '@filoz/synapse-core/chains'
+import type { FilecoinChain } from '@filoz/synapse-core/chains'
 import terminalLink from 'terminal-link'
 
 /**
@@ -15,27 +15,30 @@ export function expandHome(path: string): string {
   return path
 }
 
-function networkSlug(chain: Chain): string {
+function networkSlug(chain: FilecoinChain): string {
   return chain.id === 314 ? 'mainnet' : 'calibration'
 }
 
-export function hashLink(hash: string, chain: Chain) {
+export function hashLink(hash: string, chain: FilecoinChain) {
   return terminalLink(hash, `${chain.blockExplorers?.default?.url}/tx/${hash}`)
 }
 
-export function datasetScannerUrl(dataSetId: string | bigint, chain: Chain) {
+export function datasetScannerUrl(
+  dataSetId: string | bigint,
+  chain: FilecoinChain
+) {
   return `https://pdp.vxb.ai/${networkSlug(chain)}/dataset/${dataSetId.toString()}`
 }
 
-export function pieceScannerUrl(pieceCid: string, chain: Chain) {
+export function pieceScannerUrl(pieceCid: string, chain: FilecoinChain) {
   return `https://pdp.vxb.ai/${networkSlug(chain)}/piece/${pieceCid}`
 }
 
-export function txExplorerUrl(hash: string, chain: Chain) {
+export function txExplorerUrl(hash: string, chain: FilecoinChain) {
   return `${chain.blockExplorers?.default?.url}/tx/${hash}`
 }
 
-export function dealbotDashboardUrl(chain: Chain) {
+export function dealbotDashboardUrl(chain: FilecoinChain) {
   return chain.id === 314
     ? 'https://dealbot.filoz.org'
     : 'https://staging.dealbot.filoz.org'

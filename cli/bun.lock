@@ -6,8 +6,8 @@
       "name": "synapse-cli",
       "dependencies": {
         "@clack/prompts": "^1.0.0",
-        "@filoz/synapse-core": "^0.7.0",
-        "@filoz/synapse-sdk": "^1.1.0",
+        "@filoz/synapse-core": "^0.8.1",
+        "@filoz/synapse-sdk": "^1.2.1",
         "conf": "^15.0.2",
         "incur": "^0.4.19",
         "terminal-link": "^5.0.0",
@@ -47,9 +47,9 @@
 
     "@clack/prompts": ["@clack/prompts@1.1.0", "", { "dependencies": { "@clack/core": "1.1.0", "sisteransi": "^1.0.5" } }, "sha512-pkqbPGtohJAvm4Dphs2M8xE29ggupihHdy1x84HNojZuMtFsHiUlRvqD24tM2+XmI+61LlfNceM3Wr7U5QES5g=="],
 
-    "@filoz/synapse-core": ["@filoz/synapse-core@0.7.0", "", { "dependencies": { "dnum": "^2.15.0", "iso-web": "^3.1.2", "multiformats": "^14.0.0", "ox": "^0.14.29", "p-locate": "^7.0.0", "p-queue": "^9.1.2", "p-some": "^7.0.0", "sync-multihash-sha2": "^1.0.0", "zod": "^4.3.5" }, "peerDependencies": { "viem": "2.x" } }, "sha512-54G+yH1DrqXpCrtSZF5SYvNma3W2iA/LH6hLWmADy5tW1CkPlvtHZ5essqrJtlk3lfNRYMWk3+13ejzXxDAWWw=="],
+    "@filoz/synapse-core": ["@filoz/synapse-core@0.8.1", "", { "dependencies": { "dnum": "^2.15.0", "iso-web": "^3.1.2", "multiformats": "^14.0.0", "ox": "^0.14.29", "p-locate": "^7.0.0", "p-some": "^7.0.0", "sync-multihash-sha2": "^1.0.0", "zod": "^4.3.5" }, "peerDependencies": { "viem": "2.x" } }, "sha512-FdslKdfi9uSjB+Z9Uq16DQzgZyRuKIFi+sSwxmOKCf2a1KYDY0peHfoc5+LJtrnOXKnfEcFUo7lBGvGVl95P3w=="],
 
-    "@filoz/synapse-sdk": ["@filoz/synapse-sdk@1.1.0", "", { "dependencies": { "@filoz/synapse-core": "^0.7.0", "multiformats": "^14.0.0" }, "peerDependencies": { "viem": "2.x" } }, "sha512-C5paiXZivxzEAujb7VA5HOA26QFaQ+om55yNpDTMLFR0zbGu7kjIWfQ0nXwziYczl1sm9UmNe7qa2SyIKw4hkQ=="],
+    "@filoz/synapse-sdk": ["@filoz/synapse-sdk@1.2.1", "", { "dependencies": { "@filoz/synapse-core": "^0.8.1", "multiformats": "^14.0.0" }, "peerDependencies": { "viem": "2.x" } }, "sha512-hi+dPOt56vckYNSUOk7Ln7/ROFBuo0HpRmJXU/0CXMoPZkHLsH7IeSXTP0hcEO4NOuJeTBtSQ8zGClZl2SXBSw=="],
 
     "@modelcontextprotocol/server": ["@modelcontextprotocol/server@2.0.0-alpha.4", "", { "dependencies": { "zod": "^4.2.0" } }, "sha512-/KEo3ZJ50HlagHp0lz2vPgfBZFtXHu6zTBXT9XqPc+4O9i4+IbBVWKq/a9yAfv/ifp0u3+mRo8SUk5kMKzhN8A=="],
 
@@ -139,13 +139,9 @@
 
     "p-locate": ["p-locate@7.0.0", "", { "dependencies": { "p-limit": "^7.2.0" } }, "sha512-FRPW2lT1b/B8/CNkCOZ/Xl4mz52CWzwb+/dLa0GcCrH7u7djFf36VftuRJ5w/eCr1YXtbTGPuGoEDVSk14EwNQ=="],
 
-    "p-queue": ["p-queue@9.2.0", "", { "dependencies": { "eventemitter3": "^5.0.4", "p-timeout": "^7.0.0" } }, "sha512-dWgLE8AH0HjQ9fe74pUkKkvzzYT18Inp4zra3lKHnnwqGvcfcUBrvF2EAVX+envufDNBOzpPq/IBUONDbI7+3g=="],
-
     "p-retry": ["p-retry@8.0.0", "", { "dependencies": { "is-network-error": "^1.3.0" } }, "sha512-kFVqH1HxOHp8LupNsOys7bSV09VYTRLxarH/mokO4Rqhk6wGi70E0jh4VzvVGXfEVNggHoHLAMWsQqHyU1Ey9A=="],
 
     "p-some": ["p-some@7.0.0", "", {}, "sha512-9ldWF6puBzuchsUq7M1THjwwmoiXesqRdpB4WH0D7urKXdGkIaDqVhQS2BSfRRYZ970j9gm3U4/h9hHQx2G1Ug=="],
-
-    "p-timeout": ["p-timeout@7.0.1", "", {}, "sha512-AxTM2wDGORHGEkPCt8yqxOTMgpfbEHqF51f/5fJCmwFC3C/zNcGT63SymH2ttOAaiIws2zVg4+izQCjrakcwHg=="],
 
     "random-int": ["random-int@3.1.0", "", {}, "sha512-h8CRz8cpvzj0hC/iH/1Gapgcl2TQ6xtnCpyOI5WvWfXf/yrDx2DOU+tD9rX23j36IF11xg1KqB9W11Z18JPMdw=="],
 
@@ -192,8 +188,6 @@
     "yocto-queue": ["yocto-queue@1.2.2", "", {}, "sha512-4LCcse/U2MHZ63HAJVE+v71o7yOdIe4cZ70Wpf8D/IyjDKYQLV5GD46B+hSTjJsvV5PztjvHoU580EftxjDZFQ=="],
 
     "zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
-
-    "p-queue/eventemitter3": ["eventemitter3@5.0.4", "", {}, "sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw=="],
 
     "viem/ox": ["ox@0.14.0", "", { "dependencies": { "@adraffy/ens-normalize": "^1.11.0", "@noble/ciphers": "^1.3.0", "@noble/curves": "1.9.1", "@noble/hashes": "^1.8.0", "@scure/bip32": "^1.7.0", "@scure/bip39": "^1.6.0", "abitype": "^1.2.3", "eventemitter3": "5.0.1" }, "peerDependencies": { "typescript": ">=5.4.0" }, "optionalPeers": ["typescript"] }, "sha512-WLOB7IKnmI3Ol6RAqY7CJdZKl8QaI44LN91OGF1061YIeN6bL5IsFcdp7+oQShRyamE/8fW/CBRWhJAOzI35Dw=="],
   }

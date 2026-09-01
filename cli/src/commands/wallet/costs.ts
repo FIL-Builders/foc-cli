@@ -1,3 +1,4 @@
+import { paginate } from '@filoz/synapse-core'
 import { formatBalance } from '@filoz/synapse-core/utils'
 import { getPdpDataSets } from '@filoz/synapse-core/warm-storage'
 import { z } from 'incur'
@@ -58,9 +59,13 @@ export const costsCommand = {
       out.step('Getting costs')
 
       const copies = c.options.copies ?? 2
-      const dataSets = await getPdpDataSets(client, {
-        address: client.account.address,
-      })
+      // Paged since synapse-core 0.8: walk every page so reuse still sees all
+      // active datasets, not just the first hundred.
+      const dataSets = await Array.fromAsync(
+        paginate(({ cursor }) =>
+          getPdpDataSets(client, { address: client.account.address, cursor })
+        )
+      )
       // Active, non-terminating datasets only. Contexts are created one at a
       // time via createContext — the plural createContexts rejects datasets
       // sharing a provider.
