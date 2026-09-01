@@ -1247,6 +1247,22 @@ describe('wallet commands', () => {
     })
   })
 
+  test('wallet fund does not treat an unknown faucet asset as USDFC', async () => {
+    claimTokens.mockResolvedValueOnce([
+      { faucetInfo: 'unexpected', tx_hash: '0xunknown' },
+    ] as any)
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      status: 'unconfirmed',
+      faucetError: 'Unexpected faucet asset: unexpected',
+      usdfc: { status: 'unconfirmed' },
+    })
+    expect(result.usdfc.txHash).toBeUndefined()
+  })
+
   test('wallet fund leaves a successful claim unconfirmed until its balance appears', async () => {
     synapsePayments.walletBalance.mockImplementation(
       async (options?: { token?: string }) => (options?.token ? 0n : 1000n)

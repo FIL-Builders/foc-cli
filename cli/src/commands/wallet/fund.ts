@@ -61,8 +61,16 @@ export const fundCommand = {
 
       out.step('Waiting for transactions to be mined')
       for (const transaction of hashes) {
-        const asset: Asset =
-          transaction.faucetInfo === 'CalibnetFIL' ? 'fil' : 'usdfc'
+        const asset: Asset | undefined =
+          transaction.faucetInfo === 'CalibnetFIL'
+            ? 'fil'
+            : transaction.faucetInfo === 'CalibnetUSDFC'
+              ? 'usdfc'
+              : undefined
+        if (!asset) {
+          faucetError = `Unexpected faucet asset: ${transaction.faucetInfo}`
+          continue
+        }
         outcomes[asset].txHash = transaction.tx_hash
         try {
           const receipt = await waitForTransactionReceipt(client, {
