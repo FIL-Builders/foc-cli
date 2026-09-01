@@ -92,7 +92,7 @@ export const fundCommand = {
           outcomes[asset].status = balance > 0n ? 'funded' : 'unconfirmed'
         }
       } catch (error) {
-        outcomes[asset].status = 'unconfirmed'
+        if (!outcomes[asset].error) outcomes[asset].status = 'unconfirmed'
         outcomes[asset].error = [
           outcomes[asset].error,
           `Balance check failed: ${(error as Error).message}`,

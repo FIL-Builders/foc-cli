@@ -1359,6 +1359,32 @@ describe('wallet commands', () => {
     })
   })
 
+  test('wallet fund preserves a reverted outcome when its balance check fails', async () => {
+    waitForTransactionReceipt.mockImplementation(
+      async (_client: any, { hash }: { hash: string }) => ({
+        status: hash === '0xusdfc' ? 'reverted' : 'success',
+      })
+    )
+    synapsePayments.walletBalance.mockImplementation(
+      async (options?: { token?: string }) => {
+        if (options?.token) throw new Error('RPC unavailable')
+        return 1000n
+      }
+    )
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(result).toMatchObject({
+      status: 'partially_funded',
+      fil: { status: 'funded' },
+      usdfc: {
+        status: 'missing',
+        error:
+          'Faucet transaction reverted; Balance check failed: RPC unavailable',
+      },
+    })
+  })
+
   test('wallet fund rechecks both balances after the faucet helper fails', async () => {
     claimTokens.mockRejectedValueOnce(new Error('faucet unavailable'))
 
