@@ -159,6 +159,15 @@ export class OutputContext {
     }
   }
 
+  failStep(message: string) {
+    if (this.log.length > 0) {
+      this.log[this.log.length - 1].status = 'failed'
+      this.log[this.log.length - 1].error = message
+    }
+    this.stopSpinner()
+    if (!this.agent) p.log.error(message)
+  }
+
   info(message: string) {
     if (!this.agent) {
       this.stopSpinner()

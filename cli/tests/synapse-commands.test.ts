@@ -1212,23 +1212,244 @@ describe('wallet commands', () => {
     })
   })
 
-  test('wallet fund claims faucet tokens, waits for FIL, and returns updated balances', async () => {
+  test('wallet fund waits for both assets and returns their updated balances', async () => {
     const result = await fundCommand.run(commandContext())
 
     expect(claimTokens).toHaveBeenCalledWith({
       address: fakeWalletClient.account.address,
     })
-    expect(waitForTransactionReceipt).toHaveBeenCalledWith(fakeWalletClient, {
-      hash: '0xfaucet',
-    })
+    expect(waitForTransactionReceipt).toHaveBeenNthCalledWith(
+      1,
+      fakeWalletClient,
+      { hash: '0xusdfc' }
+    )
+    expect(waitForTransactionReceipt).toHaveBeenNthCalledWith(
+      2,
+      fakeWalletClient,
+      { hash: '0xfil' }
+    )
     expect(synapsePayments.walletBalance).toHaveBeenNthCalledWith(1)
     expect(synapsePayments.walletBalance).toHaveBeenNthCalledWith(2, {
       token: 'USDFC',
     })
     expect(result).toMatchObject({
-      fil: 'formatted:1000',
-      usdfc: 'formatted:2000',
+      status: 'funded',
+      fil: {
+        status: 'funded',
+        balance: 'formatted:1000',
+        txHash: '0xfil',
+      },
+      usdfc: {
+        status: 'funded',
+        balance: 'formatted:2000',
+        txHash: '0xusdfc',
+      },
     })
+  })
+
+  test('wallet fund does not treat an unknown faucet asset as USDFC', async () => {
+    claimTokens.mockResolvedValueOnce([
+      { faucetInfo: 'unexpected', tx_hash: '0xunknown' },
+    ] as any)
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      status: 'unconfirmed',
+      faucetError: 'Unexpected faucet asset: unexpected',
+      usdfc: { status: 'unconfirmed' },
+    })
+    expect(result.usdfc.txHash).toBeUndefined()
+    expect(result.processLog[1]).toMatchObject({ status: 'failed' })
+  })
+
+  test('wallet fund leaves a successful claim unconfirmed until its balance appears', async () => {
+    synapsePayments.walletBalance.mockImplementation(
+      async (options?: { token?: string }) => (options?.token ? 0n : 1000n)
+    )
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(result).toMatchObject({
+      status: 'unconfirmed',
+      fil: { status: 'funded', balance: 'formatted:1000' },
+      usdfc: { status: 'unconfirmed', balance: 'formatted:0' },
+    })
+    expect(result.cta.description).toContain('USDFC is unconfirmed')
+    expect(result.cta.description).toContain(
+      'Check unconfirmed balances before retrying'
+    )
+    expect(result.cta.description).not.toContain('Request')
+    expect(result.cta.description).not.toContain('faucet')
+    expect(result.cta.commands).toEqual([
+      {
+        command: 'wallet balance',
+        options: { chain: 314159 },
+        description: 'Verify wallet balances before continuing',
+      },
+    ])
+  })
+
+  test('wallet fund directs successful claims through upload costing', async () => {
+    const result = await fundCommand.run(commandContext())
+
+    expect(result.cta).toEqual({
+      description:
+        'Funding complete. Run wallet costs for the intended upload before depositing.',
+      commands: [],
+    })
+  })
+
+  test('wallet fund does not treat an existing balance as proof after a receipt timeout', async () => {
+    waitForTransactionReceipt.mockImplementation(
+      async (_client: any, { hash }: { hash: string }) => {
+        if (hash === '0xusdfc') throw new Error('receipt timed out')
+        return { status: 'success' }
+      }
+    )
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(waitForTransactionReceipt).toHaveBeenCalledTimes(2)
+    expect(synapsePayments.walletBalance).toHaveBeenNthCalledWith(1)
+    expect(synapsePayments.walletBalance).toHaveBeenNthCalledWith(2, {
+      token: 'USDFC',
+    })
+    expect(result).toMatchObject({
+      status: 'unconfirmed',
+      fil: { status: 'funded' },
+      usdfc: {
+        status: 'unconfirmed',
+        balance: 'formatted:2000',
+        error: 'receipt timed out',
+      },
+    })
+    expect(result.processLog[1]).toEqual({
+      step: 'Waiting for transactions to be mined',
+      status: 'failed',
+      error: 'receipt timed out',
+    })
+  })
+
+  test('wallet fund does not retry an unconfirmed zero balance after a receipt timeout', async () => {
+    waitForTransactionReceipt.mockImplementation(
+      async (_client: any, { hash }: { hash: string }) => {
+        if (hash === '0xusdfc') throw new Error('receipt timed out')
+        return { status: 'success' }
+      }
+    )
+    synapsePayments.walletBalance.mockImplementation(
+      async (options?: { token?: string }) => (options?.token ? 0n : 1000n)
+    )
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(result).toMatchObject({
+      status: 'unconfirmed',
+      fil: { status: 'funded' },
+      usdfc: {
+        status: 'unconfirmed',
+        balance: 'formatted:0',
+        error: 'receipt timed out',
+      },
+    })
+    expect(result.cta.description).toContain(
+      'Check unconfirmed balances before retrying'
+    )
+    expect(result.cta.description).not.toContain('Request')
+    expect(result.cta.description).not.toContain('faucet')
+  })
+
+  test('wallet fund preserves a reverted outcome despite an existing balance', async () => {
+    waitForTransactionReceipt.mockImplementation(
+      async (_client: any, { hash }: { hash: string }) => ({
+        status: hash === '0xusdfc' ? 'reverted' : 'success',
+      })
+    )
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(result).toMatchObject({
+      status: 'partially_funded',
+      fil: { status: 'funded' },
+      usdfc: {
+        status: 'missing',
+        balance: 'formatted:2000',
+        error: 'Faucet transaction reverted',
+      },
+    })
+  })
+
+  test('wallet fund preserves a reverted outcome when its balance check fails', async () => {
+    waitForTransactionReceipt.mockImplementation(
+      async (_client: any, { hash }: { hash: string }) => ({
+        status: hash === '0xusdfc' ? 'reverted' : 'success',
+      })
+    )
+    synapsePayments.walletBalance.mockImplementation(
+      async (options?: { token?: string }) => {
+        if (options?.token) throw new Error('RPC unavailable')
+        return 1000n
+      }
+    )
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(result).toMatchObject({
+      status: 'partially_funded',
+      fil: { status: 'funded' },
+      usdfc: {
+        status: 'missing',
+        error:
+          'Faucet transaction reverted; Balance check failed: RPC unavailable',
+      },
+    })
+    expect(result.processLog[2]).toEqual({
+      step: 'Fetching updated balances',
+      status: 'failed',
+      error: 'Balance check failed: RPC unavailable',
+    })
+  })
+
+  test('wallet fund rechecks both balances after the faucet helper fails', async () => {
+    claimTokens.mockRejectedValueOnce(new Error('faucet unavailable'))
+
+    const result = await fundCommand.run(commandContext())
+
+    expect(waitForTransactionReceipt).not.toHaveBeenCalled()
+    expect(synapsePayments.walletBalance).toHaveBeenNthCalledWith(1)
+    expect(synapsePayments.walletBalance).toHaveBeenNthCalledWith(2, {
+      token: 'USDFC',
+    })
+    expect(result).toMatchObject({
+      status: 'unconfirmed',
+      faucetError: 'faucet unavailable',
+      fil: { status: 'unconfirmed', balance: 'formatted:1000' },
+      usdfc: { status: 'unconfirmed', balance: 'formatted:2000' },
+    })
+    expect(result.processLog[0]).toEqual({
+      step: 'Requesting faucet tokens',
+      status: 'failed',
+      error: 'faucet unavailable',
+    })
+    expect(result.error).toBeUndefined()
+    expect(result.cta.description).not.toContain('Request')
+  })
+
+  test('wallet fund rejects mainnet before creating a client or contacting a faucet', async () => {
+    const result = await fundCommand.run(
+      commandContext({ options: { chain: 314 } })
+    )
+
+    expect(result.error).toEqual({
+      code: 'TESTNET_ONLY',
+      message:
+        'wallet fund only supports Filecoin Calibration (chain 314159). Fund mainnet wallets by sending FIL and USDFC to the wallet address.',
+    })
+    expect(privateKeyClient).not.toHaveBeenCalled()
+    expect(claimTokens).not.toHaveBeenCalled()
+    expect(synapsePayments.walletBalance).not.toHaveBeenCalled()
   })
 
   test('wallet summary maps account summary balances and funding timeline', async () => {
