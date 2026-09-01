@@ -4,6 +4,8 @@ How foc-cli reports failures: every command returns a structured error envelope 
 
 **Retry semantics:** `retryable: true` means the same call may succeed if repeated (network/provider hiccups) — retry with backoff (e.g. 2s, 10s, 30s; give up after ~3 attempts). Errors without the flag are usually input, state, or funding problems: fix the cause instead of retrying. Never blind-retry fund-moving commands (`deposit`, `withdraw`, `upload`) — re-check state with `wallet balance` / `dataset list` first so a slow-but-successful transaction isn't repeated.
 
+`wallet fund` is the exception to the error-envelope rule after a faucet attempt: it returns a structured result even when funding is partial, missing, or unconfirmed so the FIL and USDFC balances, transaction hashes, and errors remain available. `unconfirmed` means the submission or receipt outcome is unknown; run `wallet balance` before retrying. Invalid chains still return `TESTNET_ONLY` as an error envelope.
+
 ## First checks — the causes behind most failures
 
 1. **No wallet configured** — message contains `Private key not found`. Run `wallet init` (see Setup in SKILL.md).
@@ -25,7 +27,7 @@ How foc-cli reports failures: every command returns a structured error envelope 
 | `KEYSTORE_TIMED_OUT` | any signing command | `cast` ran but did not finish within 30s — almost always the password prompt with nobody to answer it | Yes (flagged), but the real fix is a private-key or key-reference wallet for automation |
 | `ADDRESS_NOT_ON_CHAIN` | `wallet balance` | Brand-new address with no onchain history yet — every balance is zero | No — fund the address first (`wallet fund` on testnet) |
 | `BALANCE_FETCH_FAILED` | `wallet balance` | RPC hiccup; no wallet configured | Once, if message looks network-y |
-| `FUND_FAILED` | `wallet fund` | Faucet rate-limit or temporarily empty (testnet-only command); RPC hiccup | Later — faucets throttle per-address |
+| `TESTNET_ONLY` | `wallet fund` | A chain other than Calibration (`314159`) was requested | No — fund mainnet by sending FIL and USDFC to the wallet address |
 | `DEPOSIT_FAILED` | `wallet deposit` | Insufficient USDFC in wallet; no FIL for gas; RPC/tx failure | Only after fixing funds |
 | `WITHDRAW_FAILED` | `wallet withdraw` | Commonly: amount exceeds *available* (unlocked) funds — active payment rails lock part of the deposit (`wallet summary` shows it). Also gas or RPC failures — read the message | Only after checking `wallet summary` |
 | `COSTS_FAILED`, `SUMMARY_FAILED` | `wallet costs` / `summary` | RPC hiccup; no wallet | Once |
