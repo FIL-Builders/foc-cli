@@ -9,6 +9,7 @@ import {
   claimTokens,
   configStore,
   createDataSet,
+  fakeDataSet,
   fakeProvider,
   fakeWalletClient,
   fetchMock,
@@ -1195,6 +1196,37 @@ describe('wallet commands', () => {
     })
   })
 
+  test('wallet costs walks every dataset page before choosing reuse candidates', async () => {
+    const base = { providerId: 77n, live: true, managed: true, pdpEndEpoch: 0n }
+    getPdpDataSets
+      .mockImplementationOnce(async () => ({
+        items: [{ ...base, dataSetId: 42n }],
+        nextCursor: 7n,
+      }))
+      .mockImplementationOnce(async () => ({
+        items: [{ ...base, dataSetId: 43n }],
+      }))
+
+    await costsCommand.run(
+      commandContext({ options: { extraBytes: 1024, extraRunway: 1 } })
+    )
+
+    expect(getPdpDataSets).toHaveBeenNthCalledWith(1, fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+      cursor: 0n,
+    })
+    expect(getPdpDataSets).toHaveBeenNthCalledWith(2, fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+      cursor: 7n,
+    })
+    expect(synapseStorage.createContext).toHaveBeenCalledTimes(2)
+    expect(synapseStorage.prepare).toHaveBeenCalledWith({
+      dataSize: 1024n,
+      extraRunwayEpochs: 86400n,
+      context: [{ dataSetId: 42n }, { dataSetId: 43n }],
+    })
+  })
+
   test('wallet costs --copies overrides how many contexts are priced', async () => {
     getPdpDataSets.mockResolvedValueOnce({ items: [] } as any)
 
@@ -1462,7 +1494,7 @@ describe('dataset commands', () => {
     }))
 
     const result = await datasetDetailsCommand.run(
-      commandContext({ options: { dataSetId: 42, cursor: 5, limit: 1 } })
+      commandContext({ options: { dataSetId: 42, cursor: '5', limit: 1 } })
     )
 
     expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
@@ -1474,9 +1506,64 @@ describe('dataset commands', () => {
     expect(result.nextCursor).toBe('8')
     expect(result.cta.commands).toContainEqual({
       command: 'dataset details',
-      options: { chain: 314159, dataSetId: 42, cursor: 8, limit: 1 },
+      options: { chain: 314159, dataSetId: 42, cursor: '8', limit: 1 },
       description: 'Show the next page of pieces (cursor 8)',
     })
+  })
+
+  // Cursors are opaque bigints from the SDK; 9007199254740993 (2^53 + 1) is
+  // not representable as a JS number, so any Number() round-trip corrupts it.
+  test('dataset details keeps cursors above 2^53 exact end to end', async () => {
+    getPiecesWithMetadata.mockImplementationOnce(async () => ({
+      items: [],
+      nextCursor: 9007199254740995n,
+    }))
+
+    const result = await datasetDetailsCommand.run(
+      commandContext({
+        options: { dataSetId: 42, cursor: '9007199254740993', limit: 1 },
+      })
+    )
+
+    expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
+      dataSet: expect.anything(),
+      address: fakeWalletClient.account.address,
+      cursor: 9007199254740993n,
+      limit: 1n,
+    })
+    expect(result.nextCursor).toBe('9007199254740995')
+    expect(result.cta.commands).toContainEqual({
+      command: 'dataset details',
+      options: {
+        chain: 314159,
+        dataSetId: 42,
+        cursor: '9007199254740995',
+        limit: 1,
+      },
+      description: 'Show the next page of pieces (cursor 9007199254740995)',
+    })
+  })
+
+  test('dataset list walks every page and keeps all datasets', async () => {
+    const secondDataSet = { ...fakeDataSet, dataSetId: 43n }
+    getPdpDataSets
+      .mockImplementationOnce(async () => ({
+        items: [fakeDataSet],
+        nextCursor: 101n,
+      }))
+      .mockImplementationOnce(async () => ({ items: [secondDataSet] }))
+
+    const result = await datasetListCommand.run(commandContext())
+
+    expect(getPdpDataSets).toHaveBeenNthCalledWith(1, fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+      cursor: 0n,
+    })
+    expect(getPdpDataSets).toHaveBeenNthCalledWith(2, fakeWalletClient, {
+      address: fakeWalletClient.account.address,
+      cursor: 101n,
+    })
+    expect(result.datasets.map((ds: any) => ds.dataSetId)).toEqual(['42', '43'])
   })
 })
 
@@ -1526,7 +1613,7 @@ describe('piece commands', () => {
     const result = await pieceListCommand.run(
       commandContext({
         args: { dataSetId: 42 },
-        options: { cursor: 5, limit: 1 },
+        options: { cursor: '5', limit: 1 },
       })
     )
 
@@ -1540,8 +1627,36 @@ describe('piece commands', () => {
     expect(result.cta.commands).toContainEqual({
       command: 'piece list',
       args: { dataSetId: 42 },
-      options: { chain: 314159, cursor: 8, limit: 1 },
+      options: { chain: 314159, cursor: '8', limit: 1 },
       description: 'Show the next page of pieces (cursor 8)',
+    })
+  })
+
+  test('piece list keeps cursors above 2^53 exact end to end', async () => {
+    getPiecesWithMetadata.mockImplementationOnce(async () => ({
+      items: [],
+      nextCursor: 9007199254740995n,
+    }))
+
+    const result = await pieceListCommand.run(
+      commandContext({
+        args: { dataSetId: 42 },
+        options: { cursor: '9007199254740993', limit: 1 },
+      })
+    )
+
+    expect(getPiecesWithMetadata).toHaveBeenCalledWith(fakeWalletClient, {
+      dataSet: expect.anything(),
+      address: fakeWalletClient.account.address,
+      cursor: 9007199254740993n,
+      limit: 1n,
+    })
+    expect(result.nextCursor).toBe('9007199254740995')
+    expect(result.cta.commands).toContainEqual({
+      command: 'piece list',
+      args: { dataSetId: 42 },
+      options: { chain: 314159, cursor: '9007199254740995', limit: 1 },
+      description: 'Show the next page of pieces (cursor 9007199254740995)',
     })
   })
 

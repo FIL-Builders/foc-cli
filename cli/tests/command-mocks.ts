@@ -169,7 +169,7 @@ export const fetchMock = mock(
 )
 globalThis.fetch = fetchMock as unknown as typeof fetch
 
-const fakeDataSet = {
+export const fakeDataSet = {
   dataSetId: 42n,
   clientDataSetId: 100n,
   provider: fakeProvider,

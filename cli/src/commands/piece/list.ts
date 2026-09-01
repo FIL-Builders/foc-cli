@@ -18,11 +18,15 @@ export const listCommand = {
       .number()
       .default(314159)
       .describe('Chain ID. 314159 = Calibration, 314 = Mainnet'),
-    cursor: z.coerce
-      .number()
+    cursor: z
+      .string()
+      .regex(
+        /^\d+$/,
+        'must be the decimal nextCursor value from a previous page'
+      )
       .optional()
       .describe(
-        'Resume from a previous page: pass the nextCursor value that page returned. Omit for the first page.'
+        'Resume from a previous page: pass the nextCursor value that page returned (an opaque decimal string). Omit for the first page.'
       ),
     limit: z.coerce
       .number()
@@ -95,7 +99,7 @@ export const listCommand = {
               {
                 command: 'piece list',
                 args: { dataSetId: c.args.dataSetId },
-                options: { cursor: Number(nextCursor), limit },
+                options: { cursor: nextCursor.toString(), limit },
                 description: `Show the next page of pieces (cursor ${nextCursor})`,
               },
             ]

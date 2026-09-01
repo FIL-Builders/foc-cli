@@ -16,11 +16,15 @@ export const detailsCommand = {
       .number()
       .default(314159)
       .describe('Chain ID. 314159 = Calibration, 314 = Mainnet'),
-    cursor: z.coerce
-      .number()
+    cursor: z
+      .string()
+      .regex(
+        /^\d+$/,
+        'must be the decimal nextCursor value from a previous page'
+      )
       .optional()
       .describe(
-        'Resume from a previous page: pass the nextCursor value that page returned. Omit for the first page.'
+        'Resume from a previous page: pass the nextCursor value that page returned (an opaque decimal string). Omit for the first page.'
       ),
     limit: z.coerce
       .number()
@@ -121,7 +125,7 @@ export const detailsCommand = {
                 command: 'dataset details',
                 options: {
                   dataSetId: c.options.dataSetId,
-                  cursor: Number(nextCursor),
+                  cursor: nextCursor.toString(),
                   limit,
                 },
                 description: `Show the next page of pieces (cursor ${nextCursor})`,
