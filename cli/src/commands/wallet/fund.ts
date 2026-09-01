@@ -88,12 +88,8 @@ export const fundCommand = {
             ? await synapse.payments.walletBalance()
             : await synapse.payments.walletBalance({ token: 'USDFC' })
         outcomes[asset].balance = formatBalance({ value: balance })
-        if (
-          balance > 0n &&
-          outcomes[asset].status === 'missing' &&
-          !outcomes[asset].error
-        ) {
-          outcomes[asset].status = 'funded'
+        if (outcomes[asset].status === 'missing' && !outcomes[asset].error) {
+          outcomes[asset].status = balance > 0n ? 'funded' : 'unconfirmed'
         }
       } catch (error) {
         outcomes[asset].status = 'unconfirmed'
@@ -139,15 +135,9 @@ export const fundCommand = {
     const cta =
       status === 'funded'
         ? {
-            description: 'Next steps:',
-            commands: [
-              {
-                command: 'wallet deposit',
-                args: { amount: '1' },
-                description: 'Deposit USDFC into payment account',
-              },
-              { command: 'wallet balance', description: 'Check balances' },
-            ],
+            description:
+              'Funding complete. Run wallet costs for the intended upload before depositing.',
+            commands: [],
           }
         : {
             description: `Funding incomplete: ${unavailableSummary}. ${recovery}`,

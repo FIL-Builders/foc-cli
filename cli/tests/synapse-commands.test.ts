@@ -1247,7 +1247,7 @@ describe('wallet commands', () => {
     })
   })
 
-  test('wallet fund reports the missing asset and a targeted recovery CTA', async () => {
+  test('wallet fund leaves a successful claim unconfirmed until its balance appears', async () => {
     synapsePayments.walletBalance.mockImplementation(
       async (options?: { token?: string }) => (options?.token ? 0n : 1000n)
     )
@@ -1255,12 +1255,16 @@ describe('wallet commands', () => {
     const result = await fundCommand.run(commandContext())
 
     expect(result).toMatchObject({
-      status: 'partially_funded',
+      status: 'unconfirmed',
       fil: { status: 'funded', balance: 'formatted:1000' },
-      usdfc: { status: 'missing', balance: 'formatted:0' },
+      usdfc: { status: 'unconfirmed', balance: 'formatted:0' },
     })
-    expect(result.cta.description).toContain('USDFC is missing')
-    expect(result.cta.description).not.toContain('FIL is missing')
+    expect(result.cta.description).toContain('USDFC is unconfirmed')
+    expect(result.cta.description).toContain(
+      'Check unconfirmed balances before retrying'
+    )
+    expect(result.cta.description).not.toContain('Request')
+    expect(result.cta.description).not.toContain('faucet')
     expect(result.cta.commands).toEqual([
       {
         command: 'wallet balance',
@@ -1268,6 +1272,16 @@ describe('wallet commands', () => {
         description: 'Verify wallet balances before continuing',
       },
     ])
+  })
+
+  test('wallet fund directs successful claims through upload costing', async () => {
+    const result = await fundCommand.run(commandContext())
+
+    expect(result.cta).toEqual({
+      description:
+        'Funding complete. Run wallet costs for the intended upload before depositing.',
+      commands: [],
+    })
   })
 
   test('wallet fund does not treat an existing balance as proof after a receipt timeout', async () => {
